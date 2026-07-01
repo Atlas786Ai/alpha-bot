@@ -3,7 +3,7 @@ import requests
 
 app = FastAPI()
 
-TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+TOKEN = "8419778746:AAG9DwtAK_U4AeBM1DdCzsvJwoqKWvuglCU"
 URL = "https://YOUR-RENDER-URL.onrender.com/update"
 
 
