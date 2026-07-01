@@ -1,31 +1,36 @@
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from fastapi import FastAPI, Request
 import requests
 
-TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+app = FastAPI()
 
+TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 URL = "https://YOUR-RENDER-URL.onrender.com/update"
 
 
-async def update_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    data = requests.get(URL).json()
-
-    msg = "🚀 ALPHA UPDATE\n\n"
-
-    for i, x in enumerate(data["top10"], 1):
-        msg += f"{i}. {x['symbol'].upper()} | {x['score']}\n"
-
-    await update.message.reply_text(msg)
+def send_message(chat_id, text):
+    requests.post(
+        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        json={"chat_id": chat_id, "text": text}
+    )
 
 
-def main():
+@app.post("/webhook")
+async def webhook(req: Request):
 
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("update", update_cmd))
+    data = await req.json()
 
-    app.run_polling()
+    chat_id = data["message"]["chat"]["id"]
+    text = data["message"].get("text", "")
 
+    if text == "/update":
 
-if __name__ == "__main__":
-    main()
+        res = requests.get(URL).json()
+
+        msg = "🚀 ALPHA UPDATE\n\n"
+
+        for i, x in enumerate(res["top10"], 1):
+            msg += f"{i}. {x['symbol'].upper()} | {x['score']}\n"
+
+        send_message(chat_id, msg)
+
+    return {"ok": True}
