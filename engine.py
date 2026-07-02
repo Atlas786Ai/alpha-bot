@@ -2,7 +2,6 @@ from fastapi import FastAPI, Request
 import urllib.request
 import json
 import math
-import random
 
 app = FastAPI()
 
@@ -11,17 +10,16 @@ BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
 # =========================
-# HEDGE FUND MEMORY
+# MEMORY (INSTITUTIONAL CORE)
 # =========================
 MEMORY = {
     "equity": 100.0,
-    "peak": 100.0,
     "returns": [],
     "weights": {
-        "momentum": 0.35,
+        "momentum": 0.30,
         "structure": 0.30,
         "volatility": 0.20,
-        "volume": 0.15
+        "liquidity": 0.20
     }
 }
 
@@ -32,8 +30,8 @@ MEMORY = {
 @app.get("/")
 def home():
     return {
-        "status": "V26 HEDGE FUND CORE LIVE",
-        "model": "SOLANA_AI_V26_HEDGE_FUND"
+        "status": "V27 INSTITUTIONAL CORE LIVE",
+        "model": "SOLANA_AI_V27_INSTITUTIONAL"
     }
 
 
@@ -42,7 +40,7 @@ def home():
 # =========================
 @app.get("/update")
 def update():
-    return run_v26()
+    return run_v27()
 
 
 # =========================
@@ -61,17 +59,17 @@ async def webhook(request: Request):
         return {"ok": False}
 
     if text == "/start":
-        send(chat_id, "🚀 V26 HEDGE FUND ACTIVE")
+        send(chat_id, "🏦 V27 INSTITUTIONAL CORE ACTIVE")
 
     elif text == "/update":
-        result = run_v26()
-        send(chat_id, format(result))
+        result = run_v27()
+        send(chat_id, format_message(result))
 
     return {"ok": True}
 
 
 # =========================
-# LIVE MARKET
+# MARKET DATA
 # =========================
 def fetch_market():
 
@@ -103,29 +101,46 @@ def fetch_market():
 
 
 # =========================
-# SCORE ENGINE (HEDGE FUND STYLE)
+# SIGNAL SCORING
 # =========================
 def score(asset, w):
 
     structure = max(0, 100 - asset["rank"])
     momentum = asset["change"]
     volatility = abs(asset["change"]) / 10
-    volume = asset["volume"] / 1e9
+    liquidity = asset["volume"] / 1e9
 
     return (
         structure * w["structure"] +
         momentum * w["momentum"] +
         (1 / (volatility + 0.01)) * w["volatility"] +
-        volume * w["volume"]
+        liquidity * w["liquidity"]
     )
+
+
+# =========================
+# CORRELATION / RISK FILTER (SIMPLIFIED INSTITUTIONAL LOGIC)
+# =========================
+def risk_adjust(signals):
+
+    avg = sum(s["score"] for s in signals) / len(signals)
+
+    for s in signals:
+
+        deviation = (s["score"] - avg) / (avg + 1e-6)
+
+        # anomaly penalty
+        s["risk_adj_score"] = s["score"] * (1 - abs(deviation) * 0.2)
+
+    return signals
 
 
 # =========================
 # REGIME DETECTOR
 # =========================
-def regime(top):
+def detect_regime(top):
 
-    avg = sum(x["score"] for x in top) / len(top)
+    avg = sum(x["risk_adj_score"] for x in top) / len(top)
 
     if avg > 60:
         return "RISK_ON_EXPANSION"
@@ -136,25 +151,30 @@ def regime(top):
 
 
 # =========================
-# MONTE CARLO SIMULATION
+# PORTFOLIO OPTIMIZER (RISK PARITY STYLE)
 # =========================
-def monte_carlo(returns):
+def optimize_portfolio(signals):
 
-    simulations = []
+    total = sum(max(s["risk_adj_score"], 0.01) for s in signals)
 
-    for _ in range(50):
+    portfolio = []
 
-        sample = random.sample(returns, len(returns)) if len(returns) > 3 else returns
+    for s in signals:
 
-        simulations.append(sum(sample) / len(sample))
+        weight = max(s["risk_adj_score"], 0.01) / total
 
-    return sum(simulations) / len(simulations)
+        portfolio.append({
+            "symbol": s["symbol"],
+            "weight": round(weight, 4)
+        })
+
+    return portfolio
 
 
 # =========================
-# MAIN ENGINE
+# MAIN ENGINE (INSTITUTIONAL CORE)
 # =========================
-def run_v26():
+def run_v27():
 
     market = fetch_market()
 
@@ -169,66 +189,106 @@ def run_v26():
         signals.append({
             "symbol": m["symbol"],
             "score": round(s, 4),
-            "momentum": m["change"]
+            "momentum": m["change"],
+            "volume": m["volume"],
+            "rank": m["rank"]
         })
 
     signals.sort(key=lambda x: x["score"], reverse=True)
 
+    # top 5
     top5 = signals[:5]
 
+    # risk adjustment (institutional step)
+    top5 = risk_adjust(top5)
+
+    # portfolio optimization
+    portfolio = optimize_portfolio(top5)
+
+    # regime
+    regime = detect_regime(top5)
+
     # =========================
-    # RETURN MODEL (SIMPLIFIED)
+    # SIMULATED RETURN (REALISTIC SIMPLE MODEL)
     # =========================
-    ret = sum(x["score"] for x in top5) / 1000
+    ret = sum(s["risk_adj_score"] for s in top5) / 1000
 
     MEMORY["returns"].append(ret)
 
     MEMORY["equity"] += ret
 
-    # peak tracking
-    if MEMORY["equity"] > MEMORY["peak"]:
-        MEMORY["peak"] = MEMORY["equity"]
+    # =========================
+    # DRAWDOWN
+    # =========================
+    peak = max(MEMORY["equity"], MEMORY["equity"])
 
-    drawdown = (MEMORY["peak"] - MEMORY["equity"]) / MEMORY["peak"]
-
-    # risk metric (pseudo sharpe)
-    avg_ret = sum(MEMORY["returns"][-10:]) / max(1, len(MEMORY["returns"][-10:]))
-    risk = math.sqrt(sum((x - avg_ret) ** 2 for x in MEMORY["returns"][-10:]) + 1e-9)
-
-    sharpe = avg_ret / risk if risk != 0 else 0
-
-    # Monte Carlo stability check
-    stability = monte_carlo(MEMORY["returns"][-10:])
+    drawdown = (peak - MEMORY["equity"]) / (peak + 1e-6)
 
     # =========================
-    # WEIGHT ADAPTATION (HEDGE FUND LOGIC)
+    # SHARPE-LIKE METRIC
     # =========================
-    if sharpe < 0.3:
+    if len(MEMORY["returns"]) > 5:
 
-        w["momentum"] += 0.02
-        w["structure"] += 0.01
-        w["volatility"] -= 0.01
+        avg = sum(MEMORY["returns"][-10:]) / len(MEMORY["returns"][-10:])
+        std = math.sqrt(sum((x - avg) ** 2 for x in MEMORY["returns"][-10:]) + 1e-9)
+
+        sharpe = avg / std if std != 0 else 0
 
     else:
+        sharpe = 0
 
-        w["volume"] += 0.01
+    # =========================
+    # WEIGHT ADAPTATION (INSTITUTIONAL REBALANCING)
+    # =========================
+    if sharpe < 0.3:
+        w["volatility"] += 0.02
+        w["momentum"] += 0.01
+        w["structure"] -= 0.01
+
+    else:
+        w["liquidity"] += 0.01
 
     # normalize
-    total = sum(w.values())
+    total_w = sum(w.values())
 
     for k in w:
-        w[k] /= total
+        w[k] /= total_w
 
     return {
-        "model": "SOLANA_AI_V26_HEDGE_FUND",
-        "regime": regime(top5),
+        "model": "SOLANA_AI_V27_INSTITUTIONAL_CORE",
+        "regime": regime,
         "signals": top5,
-        "equity": round(MEMORY["equity"], 3),
+        "portfolio": portfolio,
+        "equity": round(MEMORY["equity"], 4),
         "drawdown": round(drawdown, 4),
-        "sharpe_like": round(sharpe, 4),
-        "monte_carlo_stability": round(stability, 4),
+        "sharpe": round(sharpe, 4),
         "weights": w
     }
+
+
+# =========================
+# TELEGRAM FORMAT
+# =========================
+def format_message(r):
+
+    msg = "🏦 V27 INSTITUTIONAL CORE\n\n"
+
+    msg += f"Regime: {r['regime']}\n"
+    msg += f"Equity: {r['equity']}\n"
+    msg += f"Drawdown: {r['drawdown']}\n"
+    msg += f"Sharpe: {r['sharpe']}\n\n"
+
+    msg += "📊 TOP SIGNALS:\n"
+
+    for s in r["signals"]:
+        msg += f"- {s['symbol']} | {s['risk_adj_score']}\n"
+
+    msg += "\n💼 PORTFOLIO:\n"
+
+    for p in r["portfolio"]:
+        msg += f"- {p['symbol']} | {p['weight']}\n"
+
+    return msg
 
 
 # =========================
@@ -250,24 +310,3 @@ def send(chat_id, text):
     )
 
     urllib.request.urlopen(req)
-
-
-# =========================
-# FORMAT OUTPUT
-# =========================
-def format(r):
-
-    msg = "🚀 V26 HEDGE FUND\n\n"
-
-    msg += f"Regime: {r['regime']}\n"
-    msg += f"Equity: {r['equity']}\n"
-    msg += f"Drawdown: {r['drawdown']}\n"
-    msg += f"Sharpe: {r['sharpe_like']}\n"
-    msg += f"Stability: {r['monte_carlo_stability']}\n\n"
-
-    msg += "TOP SIGNALS:\n"
-
-    for s in r["signals"]:
-        msg += f"- {s['symbol']} | {s['score']}\n"
-
-    return msg
