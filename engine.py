@@ -7,46 +7,34 @@ def get_market():
     params = {
         "vs_currency": "usd",
         "order": "market_cap_desc",
-        "per_page": 20,
+        "per_page": 10,
         "page": 1,
-        "sparkline": False,
-        "price_change_percentage": "24h"
+        "sparkline": False
     }
 
-    data = requests.get(url, params=params, timeout=10).json()
+    res = requests.get(url, params=params)
 
-    if not isinstance(data, list):
-        return []
+    print("STATUS:", res.status_code)
+    print("TEXT:", res.text[:500])  # فقط 500 کاراکتر اول
 
-    return data
+    return res.json()
 
 
 def run_engine():
 
     data = get_market()
 
+    print("DATA TYPE:", type(data))
+    print("DATA SAMPLE:", data[:1] if isinstance(data, list) else data)
+
     results = []
 
     for c in data:
 
-        if not isinstance(c, dict):
-            continue
+        if isinstance(c, dict):
+            results.append({
+                "symbol": c.get("symbol"),
+                "score": c.get("price_change_percentage_24h", 0) or 0
+            })
 
-        change_24h = c.get("price_change_percentage_24h", 0)
-
-        # مهم: جلوگیری از None
-        if change_24h is None:
-            change_24h = 0
-
-        score = change_24h
-
-        results.append({
-            "symbol": c.get("symbol", "unknown"),
-            "score": round(score, 2)
-        })
-
-    results.sort(key=lambda x: x["score"], reverse=True)
-
-    return {
-        "top10": results[:10]
-    }
+    return {"top10": results}
