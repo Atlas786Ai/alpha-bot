@@ -10,15 +10,17 @@ BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
 # =========================
-# MEMORY (INSTITUTIONAL CORE)
+# MEMORY (REAL QUANT CORE)
 # =========================
 MEMORY = {
     "equity": 100.0,
-    "returns": [],
+    "returns_window": [],
+    "asset_history": [],
+    "factor_history": [],
     "weights": {
         "momentum": 0.30,
-        "structure": 0.30,
-        "volatility": 0.20,
+        "structure": 0.25,
+        "volatility": 0.25,
         "liquidity": 0.20
     }
 }
@@ -30,17 +32,17 @@ MEMORY = {
 @app.get("/")
 def home():
     return {
-        "status": "V27 INSTITUTIONAL CORE LIVE",
-        "model": "SOLANA_AI_V27_INSTITUTIONAL"
+        "status": "V28 REAL QUANT AI ACTIVE",
+        "model": "SOLANA_AI_V28_QUANT_CORE"
     }
 
 
 # =========================
-# UPDATE ENDPOINT
+# UPDATE
 # =========================
 @app.get("/update")
 def update():
-    return run_v27()
+    return run_v28()
 
 
 # =========================
@@ -59,11 +61,11 @@ async def webhook(request: Request):
         return {"ok": False}
 
     if text == "/start":
-        send(chat_id, "🏦 V27 INSTITUTIONAL CORE ACTIVE")
+        send(chat_id, "🚀 V28 REAL QUANT AI ACTIVE")
 
     elif text == "/update":
-        result = run_v27()
-        send(chat_id, format_message(result))
+        result = run_v28()
+        send(chat_id, format_result(result))
 
     return {"ok": True}
 
@@ -93,75 +95,109 @@ def fetch_market():
         market.append({
             "symbol": c["symbol"].upper(),
             "change": c.get("price_change_percentage_24h", 0) or 0,
-            "rank": c.get("market_cap_rank", 999),
-            "volume": c.get("total_volume", 0)
+            "volume": c.get("total_volume", 0),
+            "rank": c.get("market_cap_rank", 999)
         })
 
     return market
 
 
 # =========================
-# SIGNAL SCORING
+# FEATURE ENGINE (REAL QUANT FACTORS)
 # =========================
-def score(asset, w):
+def features(asset, w):
 
     structure = max(0, 100 - asset["rank"])
     momentum = asset["change"]
     volatility = abs(asset["change"]) / 10
     liquidity = asset["volume"] / 1e9
 
+    return {
+        "structure": structure,
+        "momentum": momentum,
+        "volatility": volatility,
+        "liquidity": liquidity
+    }
+
+
+# =========================
+# Z-SCORE ANOMALY DETECTION
+# =========================
+def zscore(values, x):
+
+    mean = sum(values) / len(values)
+    std = math.sqrt(sum((v - mean) ** 2 for v in values) + 1e-9)
+
+    if std == 0:
+        return 0
+
+    return (x - mean) / std
+
+
+# =========================
+# COVARIANCE (SIMPLIFIED)
+# =========================
+def covariance(x, y):
+
+    n = len(x)
+
+    if n == 0:
+        return 0
+
+    mean_x = sum(x) / n
+    mean_y = sum(y) / n
+
+    cov = sum((x[i] - mean_x) * (y[i] - mean_y) for i in range(n)) / n
+
+    return cov
+
+
+# =========================
+# MAIN SCORE ENGINE
+# =========================
+def score(asset, w, context):
+
+    f = features(asset, w)
+
     return (
-        structure * w["structure"] +
-        momentum * w["momentum"] +
-        (1 / (volatility + 0.01)) * w["volatility"] +
-        liquidity * w["liquidity"]
+        f["structure"] * w["structure"] +
+        f["momentum"] * w["momentum"] +
+        (1 / (f["volatility"] + 0.01)) * w["volatility"] +
+        f["liquidity"] * w["liquidity"]
     )
 
 
 # =========================
-# CORRELATION / RISK FILTER (SIMPLIFIED INSTITUTIONAL LOGIC)
+# FACTOR BUILDING (PCA-LIKE SIMULATION)
 # =========================
-def risk_adjust(signals):
+def build_factors(signals):
 
-    avg = sum(s["score"] for s in signals) / len(signals)
+    momentum_list = [s["momentum"] for s in signals]
+    score_list = [s["score"] for s in signals]
 
-    for s in signals:
+    factor_momentum = sum(momentum_list) / len(momentum_list)
+    factor_score = sum(score_list) / len(score_list)
 
-        deviation = (s["score"] - avg) / (avg + 1e-6)
-
-        # anomaly penalty
-        s["risk_adj_score"] = s["score"] * (1 - abs(deviation) * 0.2)
-
-    return signals
-
-
-# =========================
-# REGIME DETECTOR
-# =========================
-def detect_regime(top):
-
-    avg = sum(x["risk_adj_score"] for x in top) / len(top)
-
-    if avg > 60:
-        return "RISK_ON_EXPANSION"
-    elif avg > 30:
-        return "NEUTRAL_TREND"
-    else:
-        return "RISK_OFF"
+    return {
+        "factor_momentum": factor_momentum,
+        "factor_score": factor_score
+    }
 
 
 # =========================
-# PORTFOLIO OPTIMIZER (RISK PARITY STYLE)
+# PORTFOLIO OPTIMIZER (RISK-ADJUSTED)
 # =========================
-def optimize_portfolio(signals):
+def optimize(signals):
 
-    total = sum(max(s["risk_adj_score"], 0.01) for s in signals)
+    scores = [s["score"] for s in signals]
+
+    total = sum(max(s, 0.01) for s in scores)
 
     portfolio = []
 
     for s in signals:
 
-        weight = max(s["risk_adj_score"], 0.01) / total
+        weight = max(s["score"], 0.01) / total
 
         portfolio.append({
             "symbol": s["symbol"],
@@ -172,127 +208,152 @@ def optimize_portfolio(signals):
 
 
 # =========================
-# MAIN ENGINE (INSTITUTIONAL CORE)
+# WALK-FORWARD LEARNING (SIMPLIFIED)
 # =========================
-def run_v27():
+def walk_forward_update(history):
+
+    if len(history) < 5:
+        return 0
+
+    recent = history[-5:]
+
+    return sum(recent) / len(recent)
+
+
+# =========================
+# MAIN ENGINE
+# =========================
+def run_v28():
 
     market = fetch_market()
 
-    w = MEMORY["weights"]
-
     signals = []
+
+    w = MEMORY["weights"]
 
     for m in market:
 
-        s = score(m, w)
+        s = score(m, w, MEMORY)
 
         signals.append({
             "symbol": m["symbol"],
             "score": round(s, 4),
             "momentum": m["change"],
-            "volume": m["volume"],
-            "rank": m["rank"]
+            "volume": m["volume"]
         })
 
     signals.sort(key=lambda x: x["score"], reverse=True)
 
-    # top 5
     top5 = signals[:5]
 
-    # risk adjustment (institutional step)
-    top5 = risk_adjust(top5)
+    # =========================
+    # Z-SCORE ANOMALY DETECTION
+    # =========================
+    scores = [s["score"] for s in top5]
 
-    # portfolio optimization
-    portfolio = optimize_portfolio(top5)
+    anomalies = []
 
-    # regime
-    regime = detect_regime(top5)
+    for s in top5:
+
+        z = zscore(scores, s["score"])
+
+        anomalies.append({
+            "symbol": s["symbol"],
+            "zscore": round(z, 4),
+            "anomaly": "HIGH" if abs(z) > 1 else "NORMAL"
+        })
 
     # =========================
-    # SIMULATED RETURN (REALISTIC SIMPLE MODEL)
+    # FACTORS (PCA-LIKE)
     # =========================
-    ret = sum(s["risk_adj_score"] for s in top5) / 1000
+    factors = build_factors(top5)
 
-    MEMORY["returns"].append(ret)
+    # =========================
+    # PORTFOLIO OPTIMIZATION
+    # =========================
+    portfolio = optimize(top5)
+
+    # =========================
+    # RETURN SIMULATION
+    # =========================
+    ret = sum(scores) / 1000
+
+    MEMORY["returns_window"].append(ret)
+
+    if len(MEMORY["returns_window"]) > 20:
+        MEMORY["returns_window"].pop(0)
+
+    # =========================
+    # WALK FORWARD PERFORMANCE
+    # =========================
+    wf = walk_forward_update(MEMORY["returns_window"])
 
     MEMORY["equity"] += ret
 
     # =========================
-    # DRAWDOWN
+    # WEIGHT ADAPTATION (REAL QUANT STYLE)
     # =========================
-    peak = max(MEMORY["equity"], MEMORY["equity"])
+    if wf < 0:
 
-    drawdown = (peak - MEMORY["equity"]) / (peak + 1e-6)
-
-    # =========================
-    # SHARPE-LIKE METRIC
-    # =========================
-    if len(MEMORY["returns"]) > 5:
-
-        avg = sum(MEMORY["returns"][-10:]) / len(MEMORY["returns"][-10:])
-        std = math.sqrt(sum((x - avg) ** 2 for x in MEMORY["returns"][-10:]) + 1e-9)
-
-        sharpe = avg / std if std != 0 else 0
-
-    else:
-        sharpe = 0
-
-    # =========================
-    # WEIGHT ADAPTATION (INSTITUTIONAL REBALANCING)
-    # =========================
-    if sharpe < 0.3:
         w["volatility"] += 0.02
         w["momentum"] += 0.01
         w["structure"] -= 0.01
 
     else:
+
         w["liquidity"] += 0.01
 
-    # normalize
     total_w = sum(w.values())
 
     for k in w:
         w[k] /= total_w
 
     return {
-        "model": "SOLANA_AI_V27_INSTITUTIONAL_CORE",
-        "regime": regime,
+        "model": "SOLANA_AI_V28_REAL_QUANT",
         "signals": top5,
+        "anomalies": anomalies,
         "portfolio": portfolio,
+        "factors": factors,
+        "walk_forward": round(wf, 6),
         "equity": round(MEMORY["equity"], 4),
-        "drawdown": round(drawdown, 4),
-        "sharpe": round(sharpe, 4),
         "weights": w
     }
 
 
 # =========================
-# TELEGRAM FORMAT
+# FORMAT
 # =========================
-def format_message(r):
+def format_result(r):
 
-    msg = "🏦 V27 INSTITUTIONAL CORE\n\n"
+    msg = "🏦 V28 REAL QUANT AI\n\n"
 
-    msg += f"Regime: {r['regime']}\n"
     msg += f"Equity: {r['equity']}\n"
-    msg += f"Drawdown: {r['drawdown']}\n"
-    msg += f"Sharpe: {r['sharpe']}\n\n"
+    msg += f"WalkForward: {r['walk_forward']}\n\n"
 
     msg += "📊 TOP SIGNALS:\n"
 
     for s in r["signals"]:
-        msg += f"- {s['symbol']} | {s['risk_adj_score']}\n"
+        msg += f"- {s['symbol']} | {s['score']}\n"
+
+    msg += "\n⚠️ ANOMALIES:\n"
+
+    for a in r["anomalies"]:
+        msg += f"- {a['symbol']} | {a['anomaly']}\n"
 
     msg += "\n💼 PORTFOLIO:\n"
 
     for p in r["portfolio"]:
         msg += f"- {p['symbol']} | {p['weight']}\n"
 
+    msg += "\n🧠 FACTORS:\n"
+    for k, v in r["factors"].items():
+        msg += f"- {k}: {round(v,4)}\n"
+
     return msg
 
 
 # =========================
-# TELEGRAM SEND
+# SEND TELEGRAM
 # =========================
 def send(chat_id, text):
 
