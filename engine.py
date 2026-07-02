@@ -7,7 +7,7 @@ def get_market():
     params = {
         "vs_currency": "usd",
         "order": "market_cap_desc",
-        "per_page": 20,
+        "per_page": 30,
         "page": 1,
         "sparkline": False
     }
@@ -25,27 +25,54 @@ def get_market():
     return data
 
 
-def compute_score(c):
+def market_regime(data):
+
+    changes = []
+
+    for c in data:
+        ch = c.get("price_change_percentage_24h", 0) or 0
+        changes.append(ch)
+
+    avg = sum(changes) / len(changes) if changes else 0
+
+    if avg > 2:
+        return "BULL"
+    elif avg < -2:
+        return "BEAR"
+    else:
+        return "NEUTRAL"
+
+
+def compute_score(c, regime):
 
     change = c.get("price_change_percentage_24h", 0) or 0
-    volume = c.get("total_volume", 0) or 0
-    market_cap = c.get("market_cap", 1) or 1
+    vol = c.get("total_volume", 0) or 0
+    mc = c.get("market_cap", 1) or 1
 
-    # ساده ولی hedge-fund style scoring
-    liquidity_score = volume / market_cap
+    liquidity = vol / mc
 
-    score = (change * 0.7) + (liquidity_score * 1000)
+    base = change * 0.6 + liquidity * 1000
 
-    return score
+    # regime adjustment
+    if regime == "BULL":
+        base *= 1.1
+    elif regime == "BEAR":
+        base *= 0.9
+
+    # volatility penalty
+    if abs(change) > 15:
+        base *= 0.7
+
+    return base
 
 
-def get_signal(score):
+def signal(score):
 
-    if score > 8:
+    if score > 10:
         return "STRONG BUY"
-    elif score > 4:
+    elif score > 6:
         return "BUY"
-    elif score > 1:
+    elif score > 2:
         return "WATCH"
     elif score > 0:
         return "HOLD"
@@ -57,6 +84,8 @@ def run_engine():
 
     data = get_market()
 
+    regime = market_regime(data)
+
     signals = []
 
     for c in data:
@@ -64,34 +93,34 @@ def run_engine():
         if not isinstance(c, dict):
             continue
 
-        score = compute_score(c)
+        sc = compute_score(c, regime)
 
         signals.append({
             "symbol": c.get("symbol", "unknown"),
-            "score": round(score, 2),
-            "action": get_signal(score)
+            "score": round(sc, 2),
+            "action": signal(sc)
         })
 
     signals.sort(key=lambda x: x["score"], reverse=True)
 
-    top = signals[:10]
+    top10 = signals[:10]
 
-    # portfolio allocation (simple risk model)
-    total = sum([max(s["score"], 0.1) for s in top])
+    total = sum([max(s["score"], 0.1) for s in top10])
 
     portfolio = []
 
-    for s in top:
+    for s in top10:
 
         weight = max(s["score"], 0.1) / total
 
         portfolio.append({
             "symbol": s["symbol"],
-            "action": s["action"],
-            "weight": round(weight, 3)
+            "weight": round(weight, 3),
+            "action": s["action"]
         })
 
     return {
-        "signals": top,
+        "regime": regime,
+        "signals": top10,
         "portfolio": portfolio
     }
