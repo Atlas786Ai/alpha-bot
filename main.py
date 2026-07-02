@@ -3,77 +3,30 @@ import requests
 
 app = FastAPI()
 
-BOT_TOKEN = "YOUR_BOT_TOKEN"
-API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+# =========================
+# CONFIG (PUT YOUR NEW TOKEN HERE)
+# =========================
+BOT_TOKEN = "8419778746:AAG9DwtAK_U4AeBM1DdCzsvJwoqKWvuglCU"
+BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
+# =========================
+# HEALTH CHECK
+# =========================
 @app.get("/")
 def home():
     return {"status": "Alpha running"}
 
 
 # =========================
-# WEBHOOK FIXED (ROBUST)
+# TEST ENDPOINT
 # =========================
-@app.post("/webhook")
-async def webhook(request: Request):
-
-    data = await request.json()
-
-    print("DEBUG WEBHOOK:", data)
-
-    message = data.get("message", {})
-    text = message.get("text", "")
-    chat_id = message.get("chat", {}).get("id")
-
-    if not chat_id:
-        return {"ok": False}
-
-    # ---------------------
-    # START COMMAND
-    # ---------------------
-    if text == "/start":
-        send_message(chat_id, "🚀 Alpha Bot is LIVE and connected!")
-
-    # ---------------------
-    # UPDATE COMMAND
-    # ---------------------
-    elif text == "/update":
-
-        result = run_engine()
-
-        send_message(chat_id, format_result(result))
-
-    return {"ok": True}
-
-
-# =========================
-# SAFE SEND MESSAGE (FIXED)
-# =========================
-def send_message(chat_id, text):
-
-    try:
-        url = f"{API}/sendMessage"
-
-        res = requests.post(url, json={
-            "chat_id": chat_id,
-            "text": text
-        })
-
-        print("SEND STATUS:", res.status_code, res.text)
-
-    except Exception as e:
-        print("SEND ERROR:", str(e))
-
-
-# =========================
-# ENGINE (TEST OR AI)
-# =========================
-def run_engine():
+@app.get("/update")
+def update():
 
     return {
-        "model": "ALPHA_V1_LIVE",
-        "regime": "LIVE",
+        "model": "ALPHA_V1_STABLE",
+        "regime": "TEST_MODE",
         "signals": [
             {"symbol": "BTC", "score": 1.0},
             {"symbol": "ETH", "score": 0.9}
@@ -86,14 +39,44 @@ def run_engine():
 
 
 # =========================
-# FORMAT OUTPUT (IMPORTANT)
+# TELEGRAM WEBHOOK
 # =========================
-def format_result(result):
+@app.post("/webhook")
+async def webhook(request: Request):
 
-    return (
-        f"📊 Alpha Update\n\n"
-        f"Model: {result['model']}\n"
-        f"Regime: {result['regime']}\n\n"
-        f"Signals: {result['signals']}\n\n"
-        f"Portfolio: {result['portfolio']}"
-    )
+    data = await request.json()
+    print("DEBUG WEBHOOK:", data)
+
+    message = data.get("message", {})
+    text = message.get("text", "")
+    chat_id = message.get("chat", {}).get("id")
+
+    if not chat_id:
+        return {"ok": False}
+
+    if text == "/start":
+        send_message(chat_id, "🚀 Alpha Bot is LIVE!")
+
+    elif text == "/update":
+        result = update()
+        send_message(chat_id, str(result))
+
+    return {"ok": True}
+
+
+# =========================
+# SEND MESSAGE (STABLE)
+# =========================
+def send_message(chat_id, text):
+
+    url = BASE_URL + "/sendMessage"
+
+    payload = {
+        "chat_id": chat_id,
+        "text": text
+    }
+
+    res = requests.post(url, data=payload)
+
+    print("STATUS:", res.status_code)
+    print("RESPONSE:", res.text)
