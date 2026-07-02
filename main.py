@@ -1,10 +1,16 @@
-from fastapi import Request
+from fastapi import FastAPI, Request
+from engine import run_engine
+
+app = FastAPI()
+
+@app.get("/")
+def home():
+    return {"status": "Alpha running"}
+
+@app.get("/update")
+def update():
+    return run_engine()
 
 @app.post("/webhook")
-async def telegram_webhook(request: Request):
-
-    data = await request.json()
-
-    print("TELEGRAM:", data)
-
+async def webhook(request: Request):
     return {"ok": True}
