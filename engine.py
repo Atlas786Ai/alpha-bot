@@ -1,30 +1,27 @@
 from fastapi import FastAPI, Request
 import urllib.request
 import json
-import random
 import math
 
 app = FastAPI()
 
-# =========================
-# CONFIG
-# =========================
 BOT_TOKEN = "PUT_YOUR_BOT_TOKEN_HERE"
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
 # =========================
-# MEMORY (ML CORE)
+# MEMORY (QUANT CORE)
 # =========================
 MEMORY = {
     "weights": {
-        "structure": 0.35,
-        "momentum": 0.35,
-        "volatility": 0.20,
-        "volume": 0.10
+        "structure": 0.4,
+        "momentum": 0.3,
+        "volatility": 0.2,
+        "volume": 0.1
     },
-    "history": [],
-    "accuracy": []
+    "returns_history": [],
+    "equity_curve": [],
+    "peak": 100.0
 }
 
 
@@ -34,17 +31,17 @@ MEMORY = {
 @app.get("/")
 def home():
     return {
-        "status": "V24 ML CORE ACTIVE",
-        "model": "SOLANA_AI_V24_MACHINE_LEARNING"
+        "status": "V25 QUANT CORE ACTIVE",
+        "model": "SOLANA_AI_V25_QUANT"
     }
 
 
 # =========================
-# UPDATE ENDPOINT
+# UPDATE
 # =========================
 @app.get("/update")
 def update():
-    return run_v24_ml()
+    return run_v25_quant()
 
 
 # =========================
@@ -55,25 +52,25 @@ async def webhook(request: Request):
 
     data = await request.json()
 
-    message = data.get("message", {})
-    text = message.get("text", "")
-    chat_id = message.get("chat", {}).get("id")
+    msg = data.get("message", {})
+    text = msg.get("text", "")
+    chat_id = msg.get("chat", {}).get("id")
 
     if not chat_id:
         return {"ok": False}
 
     if text == "/start":
-        send_message(chat_id, "🚀 V24 ML CORE ACTIVE")
+        send(chat_id, "🚀 V25 QUANT CORE ACTIVE")
 
     elif text == "/update":
-        result = run_v24_ml()
-        send_message(chat_id, format_result(result))
+        result = run_v25_quant()
+        send(chat_id, format(result))
 
     return {"ok": True}
 
 
 # =========================
-# LIVE MARKET (CoinGecko)
+# LIVE MARKET
 # =========================
 def fetch_market():
 
@@ -88,10 +85,8 @@ def fetch_market():
     }
 
     query = urllib.parse.urlencode(params)
-    full_url = url + "?" + query
-
-    response = urllib.request.urlopen(full_url, timeout=5)
-    data = json.loads(response.read())
+    raw = urllib.request.urlopen(url + "?" + query, timeout=5).read()
+    data = json.loads(raw)
 
     market = []
 
@@ -108,101 +103,145 @@ def fetch_market():
 
 
 # =========================
-# ML SCORING ENGINE
+# QUANT SCORE ENGINE
 # =========================
-def ml_score(asset):
-
-    w = MEMORY["weights"]
+def score(asset, w):
 
     structure = max(0, 100 - asset["rank"])
     momentum = asset["change"]
     volatility = abs(asset["change"]) / 10
     volume = asset["volume"] / 1e9
 
-    score = (
+    return (
         structure * w["structure"] +
         momentum * w["momentum"] +
         (1 / (volatility + 0.01)) * w["volatility"] +
         volume * w["volume"]
     )
 
-    return score
+
+# =========================
+# BACKTEST SIMULATION RETURN
+# =========================
+def simulate_return(top_assets):
+
+    # fake but structured return model
+    r = 0
+
+    for a in top_assets:
+
+        r += a["score"] * 0.01
+
+    noise = 0.05 * (r * 0.1)
+
+    return r + noise
+
+
+# =========================
+# SHARPE RATIO (SIMPLIFIED)
+# =========================
+def sharpe(returns):
+
+    if len(returns) < 2:
+        return 0
+
+    avg = sum(returns) / len(returns)
+
+    variance = sum((x - avg) ** 2 for x in returns) / len(returns)
+
+    std = math.sqrt(variance)
+
+    if std == 0:
+        return 0
+
+    return avg / std
 
 
 # =========================
 # MAIN ENGINE
 # =========================
-def run_v24_ml():
+def run_v25_quant():
 
     market = fetch_market()
+
+    w = MEMORY["weights"]
 
     signals = []
 
     for m in market:
 
-        score = ml_score(m)
+        s = score(m, w)
 
         signals.append({
             "symbol": m["symbol"],
-            "score": round(score, 4),
-            "momentum": m["change"],
-            "rank": m["rank"]
+            "score": round(s, 4),
+            "momentum": m["change"]
         })
 
     signals.sort(key=lambda x: x["score"], reverse=True)
 
     top5 = signals[:5]
 
-    # store history (for learning)
-    MEMORY["history"].append(top5)
+    # =========================
+    # QUANT RETURN SIMULATION
+    # =========================
+    ret = simulate_return(top5)
 
-    # run ML update
-    update_weights(top5)
+    MEMORY["returns_history"].append(ret)
 
-    return {
-        "model": "SOLANA_AI_V24_ML_CORE",
-        "signals": top5,
-        "weights": MEMORY["weights"],
-        "history_size": len(MEMORY["history"])
-    }
+    MEMORY["equity_curve"].append(
+        MEMORY["equity_curve"][-1] + ret if MEMORY["equity_curve"] else 100 + ret
+    )
 
+    # =========================
+    # DRAWDOWN
+    # =========================
+    current = MEMORY["equity_curve"][-1]
 
-# =========================
-# MACHINE LEARNING UPDATE (KEY PART)
-# =========================
-def update_weights(top5):
+    if current > MEMORY["peak"]:
+        MEMORY["peak"] = current
 
-    # simulate reward signal (real future would be backtest return)
-    reward = sum([x["score"] for x in top5]) / len(top5)
+    drawdown = (MEMORY["peak"] - current) / MEMORY["peak"]
 
-    # error signal
-    error = 100 - reward
+    # =========================
+    # SHARPE
+    # =========================
+    sharpe_score = sharpe(MEMORY["returns_history"][-20:])
 
-    # adaptive learning rate
-    lr = 0.01
+    # =========================
+    # ADAPTIVE WEIGHT UPDATE
+    # =========================
+    if sharpe_score < 0.5:
 
-    # gradient-like update (simple but real ML concept)
-    if error > 0:
+        MEMORY["weights"]["structure"] += 0.02
+        MEMORY["weights"]["momentum"] += 0.01
+        MEMORY["weights"]["volatility"] -= 0.01
 
-        MEMORY["weights"]["structure"] += lr * (error * 0.01)
-        MEMORY["weights"]["momentum"] += lr * (error * 0.02)
-        MEMORY["weights"]["volatility"] -= lr * (error * 0.01)
-        MEMORY["weights"]["volume"] += lr * (error * 0.005)
+    else:
 
-    # normalize weights
+        MEMORY["weights"]["volume"] += 0.01
+
+    # normalize
     total = sum(MEMORY["weights"].values())
 
     for k in MEMORY["weights"]:
         MEMORY["weights"][k] /= total
 
-    # store accuracy proxy
-    MEMORY["accuracy"].append(1 / (1 + abs(error)))
+    return {
+        "model": "SOLANA_AI_V25_QUANT_CORE",
+        "signals": top5,
+        "return": round(ret, 4),
+        "sharpe": round(sharpe_score, 4),
+        "drawdown": round(drawdown, 4),
+        "equity": round(MEMORY["equity_curve"][-1], 2),
+        "weights": MEMORY["weights"]
+    }
 
 
 # =========================
 # TELEGRAM SEND
 # =========================
-def send_message(chat_id, text):
+def send(chat_id, text):
 
     url = f"{BASE_URL}/sendMessage"
 
@@ -213,7 +252,7 @@ def send_message(chat_id, text):
 
     req = urllib.request.Request(
         url,
-        data=json.dumps(data).encode("utf-8"),
+        data=json.dumps(data).encode(),
         headers={"Content-Type": "application/json"}
     )
 
@@ -221,23 +260,20 @@ def send_message(chat_id, text):
 
 
 # =========================
-# FORMAT MESSAGE
+# FORMAT OUTPUT
 # =========================
-def format_result(result):
+def format(result):
 
-    msg = "🚀 V24 ML CORE\n\n"
+    msg = "🚀 V25 QUANT CORE\n\n"
 
-    msg += f"Model: {result['model']}\n"
-    msg += f"History: {result['history_size']}\n\n"
+    msg += f"Return: {result['return']}\n"
+    msg += f"Sharpe: {result['sharpe']}\n"
+    msg += f"Drawdown: {result['drawdown']}\n"
+    msg += f"Equity: {result['equity']}\n\n"
 
-    msg += "📊 TOP SIGNALS:\n"
+    msg += "📊 SIGNALS:\n"
 
     for s in result["signals"]:
-        msg += f"- {s['symbol']} | score: {s['score']}\n"
-
-    msg += "\n🧠 WEIGHTS:\n"
-
-    for k, v in result["weights"].items():
-        msg += f"- {k}: {round(v,4)}\n"
+        msg += f"- {s['symbol']} | {s['score']}\n"
 
     return msg
