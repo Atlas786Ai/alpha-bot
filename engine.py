@@ -2,78 +2,91 @@ import math
 import random
 
 # -----------------------------
-# MARKET SIMULATION (stable)
+# MARKET SIM (still stable, but richer)
 # -----------------------------
 def get_data():
 
     return [
-        {"symbol": "SOL", "price_change": random.uniform(1, 12), "volume": random.uniform(8e8, 2e9), "volatility": random.uniform(0.03, 0.12)},
-        {"symbol": "ARB", "price_change": random.uniform(0, 10), "volume": random.uniform(3e8, 1.2e9), "volatility": random.uniform(0.05, 0.18)},
-        {"symbol": "AVAX", "price_change": random.uniform(-1, 9), "volume": random.uniform(4e8, 1.5e9), "volatility": random.uniform(0.04, 0.15)},
-        {"symbol": "DOGE", "price_change": random.uniform(-2, 15), "volume": random.uniform(5e8, 1.8e9), "volatility": random.uniform(0.06, 0.22)},
-        {"symbol": "ETH", "price_change": random.uniform(-1, 6), "volume": random.uniform(8e8, 2e9), "volatility": random.uniform(0.02, 0.06)},
-        {"symbol": "BTC", "price_change": random.uniform(-1, 5), "volume": random.uniform(1e9, 3e9), "volatility": random.uniform(0.01, 0.04)},
+        {"symbol": "SOL", "price_change": random.uniform(-2, 12), "volume": random.uniform(8e8, 2e9), "volatility": random.uniform(0.03, 0.15)},
+        {"symbol": "ARB", "price_change": random.uniform(-1, 10), "volume": random.uniform(3e8, 1.3e9), "volatility": random.uniform(0.05, 0.2)},
+        {"symbol": "AVAX", "price_change": random.uniform(-2, 9), "volume": random.uniform(4e8, 1.5e9), "volatility": random.uniform(0.04, 0.18)},
+        {"symbol": "DOGE", "price_change": random.uniform(-3, 15), "volume": random.uniform(5e8, 2e9), "volatility": random.uniform(0.06, 0.25)},
+        {"symbol": "ETH", "price_change": random.uniform(-2, 7), "volume": random.uniform(8e8, 2e9), "volatility": random.uniform(0.02, 0.08)},
+        {"symbol": "BTC", "price_change": random.uniform(-1, 5), "volume": random.uniform(1e9, 3e9), "volatility": random.uniform(0.01, 0.05)},
     ]
 
 
 # -----------------------------
-# FEATURE ENGINE (professional)
+# AI FEATURE EMBEDDING (key upgrade)
 # -----------------------------
-def features(c):
+def embed(c):
 
     momentum = c["price_change"]
     volume = math.log10(c["volume"] + 1)
     vol = c["volatility"]
 
-    # breakout intensity
-    breakout = momentum * vol * 12
-
-    # liquidity pressure
-    liquidity = volume * vol
-
-    # acceleration (non-linear hype)
-    acceleration = math.sqrt(abs(momentum)) * volume
-
-    # risk distortion (important for regime shift detection)
-    risk = abs(vol - 0.08)
-
-    return breakout, liquidity, acceleration, risk, momentum, vol
+    # normalized behavioral vector
+    return [
+        momentum / 10,
+        volume / 10,
+        vol,
+        momentum * vol,
+        volume * vol,
+        abs(momentum) * volume
+    ]
 
 
 # -----------------------------
-# SOLANA-LIKE NARRATIVE MODEL
+# "LEARNED STYLE" WEIGHTS (simulated AI memory)
 # -----------------------------
-def solana_similarity(c):
+def get_dynamic_weights():
 
-    breakout, liquidity, acceleration, risk, momentum, vol = features(c)
+    # simulating adaptive learning (like model tuning over time)
+    return {
+        "w_momentum": random.uniform(1.5, 2.5),
+        "w_volume": random.uniform(0.8, 1.5),
+        "w_volatility": random.uniform(2.0, 3.5),
+        "w_interaction": random.uniform(1.0, 2.0)
+    }
+
+
+# -----------------------------
+# AI SCORING FUNCTION
+# -----------------------------
+def ai_score(c, w):
+
+    momentum = c["price_change"]
+    volume = math.log10(c["volume"] + 1)
+    vol = c["volatility"]
+
+    interaction = momentum * vol * volume
 
     score = (
-        breakout * 3.0 +
-        liquidity * 1.4 +
-        math.log1p(acceleration) * 2.0 -
-        risk * 6.0
+        w["w_momentum"] * momentum +
+        w["w_volume"] * volume -
+        w["w_volatility"] * abs(vol - 0.08) +
+        w["w_interaction"] * math.log1p(abs(interaction))
     )
 
     return score
 
 
 # -----------------------------
-# REGIME DETECTOR (NEW)
+# CLUSTERING (behavioral regime signal)
 # -----------------------------
-def detect_regime(signals):
+def detect_ai_regime(scores):
 
-    avg = sum([s["sol_score"] for s in signals]) / len(signals)
+    avg = sum(scores) / len(scores)
+    spread = max(scores) - min(scores)
 
-    volatility_cluster = sum([s["vol"] for s in signals]) / len(signals)
-
-    if avg > 80 and volatility_cluster > 0.1:
-        return "MEME_SUPERCYCLE"
-    elif avg > 50:
-        return "HIGH_BETA_BREAKOUT"
-    elif avg > 25:
-        return "EARLY_ROTATION"
+    if avg > 8 and spread > 5:
+        return "EXPLOSIVE_ROTATION"
+    elif avg > 4:
+        return "TRENDING_BIAS"
+    elif avg > 0:
+        return "EARLY_ACCUMULATION"
     else:
-        return "CHOP_MARKET"
+        return "DISTRIBUTION_PHASE"
 
 
 # -----------------------------
@@ -83,63 +96,62 @@ def run_engine():
 
     data = get_data()
 
+    weights = get_dynamic_weights()
+
     signals = []
+    scores = []
 
     for c in data:
 
-        sol_score = solana_similarity(c)
-
-        breakout, liquidity, acceleration, risk, momentum, vol = features(c)
+        score = ai_score(c, weights)
+        scores.append(score)
 
         signals.append({
             "symbol": c["symbol"],
-            "sol_score": round(sol_score, 3),
-            "momentum": round(momentum, 3),
-            "vol": round(vol, 3),
-            "breakout": round(breakout, 3),
-            "liquidity": round(liquidity, 3)
+            "ai_score": round(score, 3),
+            "momentum": round(c["price_change"], 3),
+            "vol": round(c["volatility"], 3),
+            "volume": round(math.log10(c["volume"] + 1), 3)
         })
 
     # ranking
-    signals = sorted(signals, key=lambda x: x["sol_score"], reverse=True)
+    signals = sorted(signals, key=lambda x: x["ai_score"], reverse=True)
 
     top = signals[:5]
 
-    # portfolio (risk-adjusted allocation)
-    total = sum([abs(s["sol_score"]) + 1 for s in top]) or 1
+    total = sum([abs(s["ai_score"]) + 1 for s in top]) or 1
 
+    # AI portfolio allocation (risk-aware + score-aware)
     portfolio = []
 
     for s in top:
 
-        risk_adj = 1 / (1 + s["vol"])
+        risk_adjust = 1 / (1 + s["vol"])
 
-        weight = ((abs(s["sol_score"]) + 1) * risk_adj) / total
+        weight = ((abs(s["ai_score"]) + 1) * risk_adjust) / total
 
         portfolio.append({
             "symbol": s["symbol"],
             "weight": round(weight, 3)
         })
 
-    # regime
-    regime = detect_regime(top)
+    regime = detect_ai_regime(scores)
 
-    # narrative layer (NEW — very important upgrade)
     leader = top[0]["symbol"]
 
-    if regime == "MEME_SUPERCYCLE":
-        narrative = f"{leader} leading speculative expansion phase"
-    elif regime == "HIGH_BETA_BREAKOUT":
-        narrative = f"{leader} driving high-beta momentum rotation"
-    elif regime == "EARLY_ROTATION":
-        narrative = f"{leader} showing early accumulation behavior"
-    else:
-        narrative = "market in consolidation phase"
+    # AI narrative layer (important upgrade)
+    narratives = {
+        "EXPLOSIVE_ROTATION": f"{leader} entering high volatility expansion cycle",
+        "TRENDING_BIAS": f"{leader} dominating directional flow",
+        "EARLY_ACCUMULATION": f"{leader} showing accumulation structure",
+        "DISTRIBUTION_PHASE": "market risk-off rotation detected"
+    }
 
     return {
-        "model": "SOLANA_2023_SIMILARITY_V2",
+        "model": "SOLANA_AI_SIMILARITY_V3",
         "regime": regime,
-        "narrative": narrative,
+        "narrative": narratives.get(regime),
         "signals": top,
-        "portfolio": portfolio
+        "portfolio": portfolio,
+        "weights": weights
     }
