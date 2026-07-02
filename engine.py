@@ -31,46 +31,38 @@ def solana_similarity(c):
     vol = c.get("total_volume", 0) or 0
     mc = c.get("market_cap", 1) or 1
 
-    liquidity_ratio = vol / mc
+    # normalize درست
+    liquidity_ratio = (vol / mc) if mc > 0 else 0
 
-    momentum = change
+    # scaling واقعی
+    momentum = change * 1.0
+    liquidity = liquidity_ratio * 50   # مهم: scale شد
 
-    liquidity = liquidity_ratio * 100
-
-    score = momentum + liquidity
-
-    return round(score, 2)
+    return momentum + liquidity
 
 
-def regime(data):
+def market_regime(data):
 
-    changes = []
-
-    for c in data:
-        ch = c.get("price_change_percentage_24h", 0) or 0
-        changes.append(ch)
+    changes = [(c.get("price_change_percentage_24h", 0) or 0) for c in data]
 
     avg = sum(changes) / len(changes) if changes else 0
 
-    if avg > 3:
+    if avg > 2:
         return "BULL"
-    elif avg < -3:
+    elif avg < -2:
         return "BEAR"
-    else:
-        return "NEUTRAL"
+    return "NEUTRAL"
 
 
-def action(score, sim):
+def action(score):
 
-    final = score + (sim * 3)
-
-    if final > 25:
+    if score > 15:
         return "SOLANA BREAKOUT 🚀"
-    elif final > 15:
+    elif score > 8:
         return "STRONG BUY"
-    elif final > 8:
+    elif score > 3:
         return "BUY"
-    elif final > 3:
+    elif score > 0:
         return "WATCH"
     else:
         return "NOISE"
@@ -80,7 +72,7 @@ def run_engine():
 
     data = get_market()
 
-    r = regime(data)
+    regime = market_regime(data)
 
     signals = []
 
@@ -90,28 +82,25 @@ def run_engine():
             continue
 
         score = solana_similarity(c)
-        sim = solana_similarity(c)
-
-        act = action(score, sim)
 
         signals.append({
             "symbol": c.get("symbol", "unknown"),
-            "score": score,
-            "solana_similarity": sim,
-            "action": act
+            "score": round(score, 2),
+            "action": action(score)
         })
 
-    signals.sort(key=lambda x: x["score"], reverse=True)
+    # مهم: حداقل threshold حذف شد
+    signals = sorted(signals, key=lambda x: x["score"], reverse=True)
 
     top10 = signals[:10]
 
-    total = sum([max(s["score"], 0.1) for s in top10])
+    total = sum([abs(s["score"]) + 1 for s in top10])
 
     portfolio = []
 
     for s in top10:
 
-        weight = max(s["score"], 0.1) / total
+        weight = (abs(s["score"]) + 1) / total
 
         portfolio.append({
             "symbol": s["symbol"],
@@ -120,7 +109,7 @@ def run_engine():
         })
 
     return {
-        "regime": r,
+        "regime": regime,
         "signals": top10,
         "portfolio": portfolio
     }
