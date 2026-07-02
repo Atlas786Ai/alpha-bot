@@ -4,80 +4,77 @@ import requests
 app = FastAPI()
 
 BOT_TOKEN = "YOUR_BOT_TOKEN"
-TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
-# -------------------------
-# HEALTH CHECK (Render)
-# -------------------------
 @app.get("/")
 def home():
     return {"status": "Alpha running"}
 
 
-# -------------------------
-# UPDATE ENDPOINT (MANUAL TEST)
-# -------------------------
-@app.get("/update")
-def update():
-
-    # اینجا موقتاً تستی گذاشتیم
-    result = {
-        "model": "ALPHA_V1_STABLE",
-        "regime": "TEST_MODE",
-        "signals": [
-            {"symbol": "BTC", "score": 1.0},
-            {"symbol": "ETH", "score": 0.9}
-        ],
-        "portfolio": [
-            {"symbol": "BTC", "weight": 0.55},
-            {"symbol": "ETH", "weight": 0.45}
-        ]
-    }
-
-    return result
-
-
-# -------------------------
-# TELEGRAM WEBHOOK (CRITICAL)
-# -------------------------
+# =========================
+# TELEGRAM WEBHOOK (FIXED)
+# =========================
 @app.post("/webhook")
 async def webhook(request: Request):
 
-    data = await request.json()
+    try:
+        data = await request.json()
+        print("DEBUG WEBHOOK:", data)
 
-    message = data.get("message", {})
-    text = message.get("text", "")
-    chat_id = message.get("chat", {}).get("id")
+        message = data.get("message", {})
+        text = message.get("text")
+        chat_id = message.get("chat", {}).get("id")
 
-    if not chat_id:
+        if not chat_id:
+            return {"ok": False}
+
+        if text == "/start":
+            send(chat_id, "🚀 Alpha bot is live")
+
+        elif text == "/update":
+            result = run_engine()
+            send(chat_id, str(result))
+
+        return {"ok": True}
+
+    except Exception as e:
+        print("WEBHOOK ERROR:", e)
         return {"ok": False}
 
-    if text == "/start":
-        send_message(chat_id, "🚀 Alpha Bot is active")
 
-    elif text == "/update":
-        result = {
-            "status": "running",
-            "signals": ["BTC", "ETH"],
-            "note": "test update response"
-        }
-        send_message(chat_id, str(result))
+# =========================
+# TEST ENDPOINT
+# =========================
+@app.get("/update")
+def update():
+    return {
+        "model": "ALPHA_V1_STABLE",
+        "regime": "TEST_MODE",
+        "signals": [{"symbol": "BTC", "score": 1.0}],
+        "portfolio": [{"symbol": "BTC", "weight": 1.0}]
+    }
 
-    return {"ok": True}
 
-
-# -------------------------
-# SEND MESSAGE FUNCTION
-# -------------------------
-def send_message(chat_id, text):
-
-    url = f"{TELEGRAM_API}/sendMessage"
-
+# =========================
+# SEND MESSAGE
+# =========================
+def send(chat_id, text):
     try:
-        requests.post(url, json={
+        requests.post(f"{API}/sendMessage", json={
             "chat_id": chat_id,
             "text": text
         })
     except Exception as e:
-        print("Telegram error:", e)
+        print("SEND ERROR:", e)
+
+
+# =========================
+# DUMMY ENGINE
+# =========================
+def run_engine():
+    return {
+        "regime": "LIVE",
+        "signals": ["SOL", "ETH", "BTC"],
+        "portfolio": [{"symbol": "SOL", "weight": 0.5}]
+    }
