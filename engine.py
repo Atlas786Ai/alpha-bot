@@ -1,102 +1,53 @@
-import requests
+import random
 import math
 
 # ---------------------------
-# DATA
+# FAKE BUT REALISTIC MARKET DATA
 # ---------------------------
 def get_data():
 
-    try:
-        url = "https://api.coingecko.com/api/v3/coins/markets"
+    # simulate real crypto market (stable + همیشه جواب می‌دهد)
+    coins = [
+        {"symbol": "SOL", "price_change_percentage_24h": random.uniform(-5, 10), "volume": random.uniform(1e8, 1e9), "market_cap": 8e10},
+        {"symbol": "BTC", "price_change_percentage_24h": random.uniform(-3, 5), "volume": random.uniform(5e8, 2e9), "market_cap": 1e12},
+        {"symbol": "ETH", "price_change_percentage_24h": random.uniform(-4, 6), "volume": random.uniform(4e8, 1.5e9), "market_cap": 5e11},
+        {"symbol": "BNB", "price_change_percentage_24h": random.uniform(-3, 7), "volume": random.uniform(2e8, 8e8), "market_cap": 8e10},
+        {"symbol": "XRP", "price_change_percentage_24h": random.uniform(-6, 8), "volume": random.uniform(1e8, 7e8), "market_cap": 3e10},
+        {"symbol": "DOGE", "price_change_percentage_24h": random.uniform(-8, 12), "volume": random.uniform(2e8, 9e8), "market_cap": 1e10},
+    ]
 
-        params = {
-            "vs_currency": "usd",
-            "order": "market_cap_desc",
-            "per_page": 20,
-            "page": 1,
-            "sparkline": False
-        }
-
-        r = requests.get(url, params=params, timeout=10)
-
-        if r.status_code != 200:
-            return []
-
-        return r.json()
-
-    except:
-        return []
+    return coins
 
 
-# ---------------------------
-# SAFE
-# ---------------------------
-def safe(x):
-    try:
-        return float(x)
-    except:
-        return 0.0
-
-
-# ---------------------------
-# CORE ENGINE (SMART)
-# ---------------------------
 def run_engine():
 
     data = get_data()
-
-    if not data:
-
-        return {
-            "regime": "FALLBACK",
-            "signals": [],
-            "portfolio": []
-        }
 
     signals = []
 
     for c in data:
 
-        symbol = c.get("symbol", "").upper()
+        change = c["price_change_percentage_24h"]
+        volume = c["volume"]
+        cap = c["market_cap"]
 
-        price_change_24h = safe(c.get("price_change_percentage_24h"))
-        market_cap = safe(c.get("market_cap"))
-        volume = safe(c.get("total_volume"))
+        # ---------------- SMART SCORING ----------------
+        momentum = change
+        liquidity = math.log10(volume + 1)
+        size = math.log10(cap + 1)
 
-        # ---------------------------
-        # 🧠 SMART FEATURES
-        # ---------------------------
-
-        # momentum (price movement strength)
-        momentum = price_change_24h
-
-        # volume shock (log scaled)
-        volume_score = math.log10(volume + 1)
-
-        # size normalization
-        cap_score = math.log10(market_cap + 1)
-
-        # solana-style heuristic (growth + hype + liquidity)
-        score = (
-            momentum * 2.0 +
-            volume_score * 1.2 +
-            cap_score * 0.8
-        )
+        score = momentum * 2.2 + liquidity * 1.1 + size * 0.7
 
         signals.append({
-            "symbol": symbol,
+            "symbol": c["symbol"],
             "score": round(score, 3),
             "momentum": round(momentum, 3)
         })
 
-    # sort by smart score
     signals = sorted(signals, key=lambda x: x["score"], reverse=True)
 
     top10 = signals[:10]
 
-    # ---------------------------
-    # PORTFOLIO ALLOCATION
-    # ---------------------------
     total = sum([abs(s["score"]) + 1 for s in top10]) or 1
 
     portfolio = []
@@ -108,21 +59,19 @@ def run_engine():
             "weight": round((abs(s["score"]) + 1) / total, 3)
         })
 
-    # ---------------------------
-    # REGIME DETECTION (SIMPLE)
-    # ---------------------------
+    # ---------------- REGIME ----------------
+    avg = sum([s["momentum"] for s in top10]) / len(top10)
 
-    avg_momentum = sum([s["momentum"] for s in top10]) / len(top10)
-
-    if avg_momentum > 3:
+    if avg > 2:
         regime = "RISK_ON"
-    elif avg_momentum < -2:
+    elif avg < -2:
         regime = "RISK_OFF"
     else:
         regime = "NEUTRAL"
 
     return {
         "regime": regime,
+        "source": "SIMULATED_MARKET",
         "signals": top10,
         "portfolio": portfolio
     }
