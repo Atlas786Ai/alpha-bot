@@ -7,149 +7,99 @@ app = FastAPI()
 
 
 # =========================
-# CONFIG
+# TARGET SYSTEM STATE
 # =========================
 DESIRED_MODEL = "SOLANA_AI_V32_UNIVERSE_DISCOVERY"
 
 
 # =========================
-# SIMULATED GIT STATE
+# RUNTIME STATE
 # =========================
-def get_git_commit():
-
-    """
-    Render doesn't always expose git info,
-    so we simulate / fallback
-    """
-
-    return os.getenv("GIT_COMMIT", "UNKNOWN_COMMIT")
-
-
-def get_runtime_model():
-
+def runtime_model():
     return os.getenv("MODEL_VERSION", "SOLANA_AI_V28_LEGACY")
 
 
-# =========================
-# HASH SIGNATURE CHECK
-# =========================
-def compute_signature():
-
-    base = get_runtime_model() + get_git_commit()
-
-    return hashlib.sha256(base.encode()).hexdigest()
+def git_commit():
+    return os.getenv("GIT_COMMIT", "UNKNOWN")
 
 
 # =========================
-# HEALTH SCORE ENGINE
+# SIGNATURE ENGINE
 # =========================
-def health_score(runtime, desired, commit):
+def signature():
+
+    raw = runtime_model() + git_commit()
+
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+# =========================
+# HEALTH ENGINE (ULTRA)
+# =========================
+def health_engine():
+
+    runtime = runtime_model()
+    commit = git_commit()
 
     score = 100
+    issues = []
+    level = "OK"
 
-    if runtime != desired:
-        score -= 60
+    # -------------------------
+    # VERSION DRIFT
+    # -------------------------
+    if runtime != DESIRED_MODEL:
+        score -= 50
+        issues.append("VERSION_DRIFT")
 
-    if commit == "UNKNOWN_COMMIT":
-        score -= 20
-
-    if runtime.startswith("SOLANA_AI_V28"):
+    # -------------------------
+    # LEGACY DETECTION
+    # -------------------------
+    if "V28" in runtime:
         score -= 25
+        issues.append("LEGACY_VERSION")
 
-    return max(score, 0)
+    # -------------------------
+    # UNKNOWN GIT STATE
+    # -------------------------
+    if commit == "UNKNOWN":
+        score -= 15
+        issues.append("NO_GIT_INFO")
 
-
-# =========================
-# VERSION COMPARATOR
-# =========================
-def vguard_pro():
-
-    runtime = get_runtime_model()
-    commit = get_git_commit()
-
-    signature = compute_signature()
-
-    is_outdated = runtime != DESIRED_MODEL
-
-    health = health_score(runtime, DESIRED_MODEL, commit)
-
-    status = "OK"
-
-    if health < 50:
-        status = "CRITICAL"
-    elif is_outdated:
-        status = "OUTDATED"
-    elif commit == "UNKNOWN_COMMIT":
-        status = "UNSTABLE"
+    # -------------------------
+    # HEALTH LEVEL CLASSIFIER
+    # -------------------------
+    if score >= 85:
+        level = "HEALTHY"
+    elif score >= 60:
+        level = "DEGRADED"
+    elif score >= 40:
+        level = "UNSTABLE"
+    else:
+        level = "CRITICAL"
 
     return {
+        "runtime_model": runtime,
         "desired_model": DESIRED_MODEL,
-        "running_model": runtime,
         "git_commit": commit,
-        "signature": signature,
-        "health_score": health,
-        "status": status,
-        "timestamp": str(datetime.datetime.utcnow()),
-        "fix_actions": generate_fix(status, runtime)
+        "health_score": max(score, 0),
+        "level": level,
+        "issues": issues,
+        "timestamp": str(datetime.datetime.utcnow())
     }
 
 
 # =========================
-# AUTO FIX SUGGESTION ENGINE
+# AUTO FIX ENGINE (SAFE MODE)
 # =========================
-def generate_fix(status, runtime):
+def auto_fix_suggestions(health):
 
     fixes = []
 
-    if status == "OUTDATED":
-        fixes.append("🔁 Redeploy latest commit on Render")
+    if "VERSION_DRIFT" in health["issues"]:
+        fixes.append("🔁 Redeploy latest version (Render manual deploy)")
 
-    if runtime.startswith("SOLANA_AI_V28"):
-        fixes.append("⚠ Upgrade main.py to V32 engine")
+    if "LEGACY_VERSION" in health["issues"]:
+        fixes.append("⚠ Replace V28/V29 with V32 unified engine")
 
-    if status == "CRITICAL":
-        fixes.append("🔥 Restart service + force rebuild")
-
-    if len(fixes) == 0:
-        fixes.append("✅ No action required")
-
-    return fixes
-
-
-# =========================
-# ROOT
-# =========================
-@app.get("/")
-def home():
-
-    return {
-        "system": "V-GUARD PRO ACTIVE",
-        "model": DESIRED_MODEL
-    }
-
-
-# =========================
-# UPDATE ENDPOINT
-# =========================
-@app.get("/update")
-def update():
-
-    return {
-        "model": DESIRED_MODEL,
-        "vguard": vguard_pro()
-    }
-
-
-# =========================
-# HEALTH ENDPOINT (NEW)
-# =========================
-@app.get("/health")
-def health():
-
-    v = vguard_pro()
-
-    return {
-        "health_score": v["health_score"],
-        "status": v["status"],
-        "runtime_model": v["running_model"]
-    }
+    if "NO_GIT_INFO" in health["issues"]:
