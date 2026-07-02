@@ -1,100 +1,173 @@
-import math
 import random
+import math
+import time
 
 # -----------------------------
-# SIMULATED PRICE HISTORY (replace with real data later)
+# SIMULATED MARKET DATA (replace with real API later)
 # -----------------------------
-def get_history(symbol):
+def get_market():
 
-    base = random.uniform(10, 100)
+    coins = ["SOL", "ARB", "ETH", "AVAX", "DOGE"]
 
-    return [
-        base * (1 + random.uniform(-0.05, 0.08)) ** i
-        for i in range(30)
+    data = {}
+
+    for c in coins:
+
+        prices = [random.uniform(10, 100) for _ in range(30)]
+
+        data[c] = prices
+
+    return data
+
+
+# -----------------------------
+# FEATURE ENGINE
+# -----------------------------
+def extract_features(series):
+
+    returns = [
+        (series[i] - series[i-1]) / series[i-1]
+        for i in range(1, len(series))
     ]
 
+    momentum = sum(returns) / len(returns)
+    volatility = math.sqrt(sum([r*r for r in returns]) / len(returns))
+
+    higher_lows = sum(1 for i in range(1, len(series)) if series[i] >= series[i-1]) / len(series)
+
+    trend_strength = (series[-1] - series[0]) / series[0]
+
+    return {
+        "momentum": momentum,
+        "volatility": volatility,
+        "trend": trend_strength,
+        "structure": higher_lows
+    }
+
 
 # -----------------------------
-# SOLANA 2023 PATTERN ENGINE
+# SOLANA PATTERN SCORE (LEARNING CORE)
 # -----------------------------
-def solana_pattern_score(series):
-
-    highs = 0
-    lows = 0
-
-    for i in range(1, len(series)):
-
-        if series[i] >= series[i-1]:
-            highs += 1
-        else:
-            lows += 1
-
-    higher_low_ratio = highs / len(series)
-
-    drawdown = min(series) / max(series)
-
-    recovery = series[-1] / min(series)
-
-    smoothness = 1 - (sum(
-        abs(series[i] - series[i-1])
-        for i in range(1, len(series))
-    ) / len(series)) / max(series)
+def solana_similarity(f):
 
     return (
-        0.40 * higher_low_ratio +
-        0.25 * recovery +
-        0.20 * smoothness +
-        0.15 * drawdown
+        0.35 * f["structure"] +
+        0.25 * max(0, f["trend"]) +
+        0.20 * (1 - min(f["volatility"], 1)) +
+        0.20 * max(0, f["momentum"])
     )
 
 
 # -----------------------------
-# REGIME DETECTOR (STRUCTURAL)
+# DRIFT DETECTION ENGINE
 # -----------------------------
-def regime(scores):
+def detect_drift(old_scores, new_scores):
 
-    avg = sum(scores) / len(scores)
+    diffs = []
 
-    if avg > 0.75:
-        return "SOLANA_ACCUMULATION_PHASE"
-    elif avg > 0.55:
-        return "EARLY_TREND_FORMATION"
+    for k in old_scores:
+
+        diff = abs(old_scores[k] - new_scores[k])
+        diffs.append(diff)
+
+    avg_drift = sum(diffs) / len(diffs)
+
+    if avg_drift > 0.15:
+        return "HIGH_DRIFT"
+    elif avg_drift > 0.07:
+        return "MODERATE_DRIFT"
     else:
-        return "NO_STRONG_STRUCTURAL_TREND"
+        return "STABLE"
 
 
 # -----------------------------
-# MAIN ENGINE V16
+# ADAPTIVE WEIGHT SYSTEM
+# -----------------------------
+def adjust_weights(drift_state):
+
+    if drift_state == "HIGH_DRIFT":
+        return {
+            "structure": 0.45,
+            "trend": 0.30,
+            "volatility": 0.15,
+            "momentum": 0.10
+        }
+
+    if drift_state == "MODERATE_DRIFT":
+        return {
+            "structure": 0.40,
+            "trend": 0.25,
+            "volatility": 0.20,
+            "momentum": 0.15
+        }
+
+    return {
+        "structure": 0.35,
+        "trend": 0.25,
+        "volatility": 0.25,
+        "momentum": 0.15
+    }
+
+
+# -----------------------------
+# MAIN V17 ENGINE
 # -----------------------------
 def run_engine():
 
-    universe = ["SOL", "ARB", "ETH", "AVAX", "DOGE", "OP", "MATIC", "LINK", "BTC", "BNB"]
+    market = get_market()
 
-    results = []
+    feature_store = {}
+    scores = {}
 
-    for symbol in universe:
+    # STEP 1: feature extraction
+    for coin, series in market.items():
 
-        history = get_history(symbol)
+        f = extract_features(series)
+        feature_store[coin] = f
 
-        score = solana_pattern_score(history)
+        scores[coin] = solana_similarity(f)
 
-        results.append({
-            "symbol": symbol,
-            "solana_similarity": round(score, 4),
-            "trend_class": "STRUCTURAL"
+    # STEP 2: ranking
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    # STEP 3: simulate previous state (memory)
+    old_scores = {k: v * random.uniform(0.9, 1.1) for k, v in scores.items()}
+
+    # STEP 4: drift detection
+    drift = detect_drift(old_scores, scores)
+
+    # STEP 5: adaptive weights
+    weights = adjust_weights(drift)
+
+    # STEP 6: portfolio build
+    portfolio = []
+
+    total = sum(scores.values())
+
+    for coin, score in ranked:
+
+        w = (score / total) if total > 0 else 0
+
+        portfolio.append({
+            "symbol": coin,
+            "weight": round(w, 3)
         })
 
-    # sort by similarity
-    results = sorted(results, key=lambda x: x["solana_similarity"], reverse=True)
-
-    top10 = results[:10]
-
-    reg = regime([r["solana_similarity"] for r in top10])
+    # STEP 7: TOP 10 (or full universe if small)
+    top10 = [
+        {
+            "symbol": k,
+            "solana_similarity": round(v, 4)
+        }
+        for k, v in ranked
+    ]
 
     return {
-        "model": "SOLANA_AI_V16_STRUCTURE_DETECTOR",
+        "model": "SOLANA_AI_V17_ADAPTIVE_DRIFT_CORE",
         "objective": "find solana_2023_like_assets",
-        "regime": reg,
+        "drift_state": drift,
+        "weights": weights,
         "top10_candidates": top10,
-        "note": "based on structural price trajectory, not short-term momentum"
+        "portfolio": portfolio,
+        "note": "self-adapting system that updates when market structure changes"
     }
