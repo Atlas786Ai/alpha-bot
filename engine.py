@@ -1,59 +1,17 @@
 import math
 import random
-import json
-import os
 
 # -----------------------------
-# MEMORY FILE (simulated learning storage)
-# -----------------------------
-MEMORY_FILE = "memory.json"
-
-
-def load_memory():
-
-    if not os.path.exists(MEMORY_FILE):
-
-        return {
-            "w_momentum": 2.0,
-            "w_volume": 1.2,
-            "w_volatility": 2.5,
-            "w_interaction": 1.5,
-            "last_regime": "NONE"
-        }
-
-    try:
-        with open(MEMORY_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {
-            "w_momentum": 2.0,
-            "w_volume": 1.2,
-            "w_volatility": 2.5,
-            "w_interaction": 1.5,
-            "last_regime": "NONE"
-        }
-
-
-def save_memory(mem):
-
-    try:
-        with open(MEMORY_FILE, "w") as f:
-            json.dump(mem, f)
-    except:
-        pass
-
-
-# -----------------------------
-# MARKET SIMULATION
+# MARKET SIM
 # -----------------------------
 def get_data():
 
     return [
-        {"symbol": "DOGE", "price_change": random.uniform(-2, 15), "volume": random.uniform(8e8, 2e9), "volatility": random.uniform(0.05, 0.25)},
-        {"symbol": "ARB", "price_change": random.uniform(-1, 12), "volume": random.uniform(4e8, 1.5e9), "volatility": random.uniform(0.04, 0.2)},
-        {"symbol": "AVAX", "price_change": random.uniform(-2, 10), "volume": random.uniform(3e8, 1.3e9), "volatility": random.uniform(0.03, 0.18)},
-        {"symbol": "ETH", "price_change": random.uniform(-1, 7), "volume": random.uniform(8e8, 2e9), "volatility": random.uniform(0.02, 0.08)},
-        {"symbol": "SOL", "price_change": random.uniform(-1, 13), "volume": random.uniform(9e8, 2e9), "volatility": random.uniform(0.03, 0.15)},
+        {"symbol": "ARB", "price_change": random.uniform(-2, 15), "volume": random.uniform(5e8, 2e9), "vol": random.uniform(0.03, 0.18)},
+        {"symbol": "DOGE", "price_change": random.uniform(-3, 16), "volume": random.uniform(6e8, 2e9), "vol": random.uniform(0.05, 0.22)},
+        {"symbol": "SOL", "price_change": random.uniform(-1, 14), "volume": random.uniform(8e8, 2e9), "vol": random.uniform(0.02, 0.15)},
+        {"symbol": "ETH", "price_change": random.uniform(-1, 8), "volume": random.uniform(8e8, 2e9), "vol": random.uniform(0.01, 0.08)},
+        {"symbol": "AVAX", "price_change": random.uniform(-2, 10), "volume": random.uniform(4e8, 1.5e9), "vol": random.uniform(0.03, 0.2)},
     ]
 
 
@@ -64,78 +22,87 @@ def features(c):
 
     momentum = c["price_change"]
     volume = math.log10(c["volume"] + 1)
-    vol = c["volatility"]
+    vol = c["vol"]
 
-    interaction = momentum * vol * volume
+    breakout = momentum * vol * 10
+    liquidity = volume * vol
+    interaction = momentum * volume * vol
 
-    return momentum, volume, vol, interaction
-
-
-# -----------------------------
-# SELF-LEARNING SCORE
-# -----------------------------
-def score(c, w):
-
-    momentum, volume, vol, interaction = features(c)
-
-    return (
-        w["w_momentum"] * momentum +
-        w["w_volume"] * volume -
-        w["w_volatility"] * abs(vol - 0.08) +
-        w["w_interaction"] * math.log1p(abs(interaction))
-    )
+    return momentum, volume, vol, breakout, liquidity, interaction
 
 
 # -----------------------------
-# REGIME DETECTION
+# AI SCORE
 # -----------------------------
-def detect(scores):
+def score(c):
+
+    m, v, vol, b, l, i = features(c)
+
+    return b * 2.2 + l * 1.3 + math.log1p(abs(i)) * 2
+
+
+# -----------------------------
+# CONFIDENCE MODEL (NEW)
+# -----------------------------
+def confidence(c):
+
+    _, _, vol, _, _, _ = features(c)
+
+    # lower volatility = higher confidence
+    return round(1 / (1 + vol), 3)
+
+
+# -----------------------------
+# ANOMALY DETECTION (NEW)
+# -----------------------------
+def anomaly(c):
+
+    m, _, vol, b, _, _ = features(c)
+
+    z = abs(m * vol * 10)
+
+    if z > 2:
+        return "EXTREME"
+    elif z > 1:
+        return "HIGH"
+    else:
+        return "NORMAL"
+
+
+# -----------------------------
+# REGIME PROBABILITY (NEW)
+# -----------------------------
+def regime_probability(scores):
 
     avg = sum(scores) / len(scores)
     spread = max(scores) - min(scores)
 
-    if avg > 8 and spread > 6:
-        return "EXPLOSIVE_ROTATION"
-    elif avg > 4:
-        return "HIGH_BETA_TREND"
-    elif avg > 0:
-        return "EARLY_ACCUMULATION"
-    else:
-        return "DISTRIBUTION"
+    prob = {
+        "EXPLOSIVE_ROTATION": 0.0,
+        "HIGH_BETA_TREND": 0.0,
+        "EARLY_ACCUMULATION": 0.0,
+        "CHOP_MARKET": 0.0
+    }
 
+    # soft probabilistic model (not hard rules)
 
-# -----------------------------
-# SELF LEARNING UPDATE RULE
-# -----------------------------
-def update_weights(mem, regime):
+    prob["EXPLOSIVE_ROTATION"] = min(1.0, max(0.0, (avg + spread) / 20))
+    prob["HIGH_BETA_TREND"] = min(1.0, max(0.0, avg / 12))
+    prob["EARLY_ACCUMULATION"] = min(1.0, max(0.0, (10 - spread) / 10))
+    prob["CHOP_MARKET"] = 1 - (prob["EXPLOSIVE_ROTATION"] + prob["HIGH_BETA_TREND"]) / 2
 
-    # simple reinforcement-like adaptation
+    # normalize
+    total = sum(prob.values()) or 1
+    for k in prob:
+        prob[k] = round(prob[k] / total, 3)
 
-    if regime == "EXPLOSIVE_ROTATION":
-        mem["w_momentum"] += 0.05
-        mem["w_interaction"] += 0.03
-
-    elif regime == "HIGH_BETA_TREND":
-        mem["w_volume"] += 0.04
-
-    elif regime == "DISTRIBUTION":
-        mem["w_volatility"] += 0.05
-        mem["w_momentum"] -= 0.03
-
-    # clamp values
-    for k in mem:
-        if isinstance(mem[k], float):
-            mem[k] = max(0.5, min(mem[k], 5.0))
-
-    return mem
+    return prob
 
 
 # -----------------------------
 # MAIN ENGINE
 # -----------------------------
 def run_engine():
-
-    mem = load_memory()
 
     data = get_data()
 
@@ -144,22 +111,23 @@ def run_engine():
 
     for c in data:
 
-        s = score(c, mem)
-
+        s = score(c)
         scores.append(s)
 
         signals.append({
             "symbol": c["symbol"],
             "ai_score": round(s, 3),
+            "confidence": confidence(c),
+            "anomaly": anomaly(c),
             "momentum": round(c["price_change"], 3),
-            "vol": round(c["volatility"], 3)
+            "vol": round(c["vol"], 3)
         })
 
     signals = sorted(signals, key=lambda x: x["ai_score"], reverse=True)
 
     top = signals[:5]
 
-    total = sum([abs(x["ai_score"]) + 1 for x in top]) or 1
+    total = sum([abs(s["ai_score"]) + 1 for s in top]) or 1
 
     portfolio = [
         {
@@ -169,30 +137,21 @@ def run_engine():
         for s in top
     ]
 
-    regime = detect(scores)
+    # regime probabilities (NEW AI layer)
+    regime_probs = regime_probability(scores)
 
-    # -----------------------------
-    # 🔥 LEARNING STEP
-    # -----------------------------
-    mem = update_weights(mem, regime)
-    mem["last_regime"] = regime
-
-    save_memory(mem)
+    best_regime = max(regime_probs, key=regime_probs.get)
 
     leader = top[0]["symbol"]
 
-    narrative_map = {
-        "EXPLOSIVE_ROTATION": f"{leader} driving aggressive expansion cycle",
-        "HIGH_BETA_TREND": f"{leader} leading momentum continuation",
-        "EARLY_ACCUMULATION": f"{leader} showing accumulation behavior",
-        "DISTRIBUTION": "risk-off rotation detected"
-    }
+    # AI narrative (more intelligent now)
+    narrative = f"{leader} leading market flow with probabilistic regime: {best_regime}"
 
     return {
-        "model": "SOLANA_AI_SELF_LEARNING_V4",
-        "regime": regime,
-        "narrative": narrative_map[regime],
+        "model": "SOLANA_AI_PROBABILISTIC_V5",
+        "regime": best_regime,
+        "regime_probabilities": regime_probs,
+        "narrative": narrative,
         "signals": top,
-        "portfolio": portfolio,
-        "weights": mem
+        "portfolio": portfolio
     }
