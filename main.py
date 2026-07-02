@@ -13,68 +13,87 @@ def home():
 
 
 # =========================
-# TELEGRAM WEBHOOK (FIXED)
+# WEBHOOK FIXED (ROBUST)
 # =========================
 @app.post("/webhook")
 async def webhook(request: Request):
 
-    try:
-        data = await request.json()
-        print("DEBUG WEBHOOK:", data)
+    data = await request.json()
 
-        message = data.get("message", {})
-        text = message.get("text")
-        chat_id = message.get("chat", {}).get("id")
+    print("DEBUG WEBHOOK:", data)
 
-        if not chat_id:
-            return {"ok": False}
+    message = data.get("message", {})
+    text = message.get("text", "")
+    chat_id = message.get("chat", {}).get("id")
 
-        if text == "/start":
-            send(chat_id, "🚀 Alpha bot is live")
-
-        elif text == "/update":
-            result = run_engine()
-            send(chat_id, str(result))
-
-        return {"ok": True}
-
-    except Exception as e:
-        print("WEBHOOK ERROR:", e)
+    if not chat_id:
         return {"ok": False}
 
+    # ---------------------
+    # START COMMAND
+    # ---------------------
+    if text == "/start":
+        send_message(chat_id, "🚀 Alpha Bot is LIVE and connected!")
+
+    # ---------------------
+    # UPDATE COMMAND
+    # ---------------------
+    elif text == "/update":
+
+        result = run_engine()
+
+        send_message(chat_id, format_result(result))
+
+    return {"ok": True}
+
 
 # =========================
-# TEST ENDPOINT
+# SAFE SEND MESSAGE (FIXED)
 # =========================
-@app.get("/update")
-def update():
-    return {
-        "model": "ALPHA_V1_STABLE",
-        "regime": "TEST_MODE",
-        "signals": [{"symbol": "BTC", "score": 1.0}],
-        "portfolio": [{"symbol": "BTC", "weight": 1.0}]
-    }
+def send_message(chat_id, text):
 
-
-# =========================
-# SEND MESSAGE
-# =========================
-def send(chat_id, text):
     try:
-        requests.post(f"{API}/sendMessage", json={
+        url = f"{API}/sendMessage"
+
+        res = requests.post(url, json={
             "chat_id": chat_id,
             "text": text
         })
+
+        print("SEND STATUS:", res.status_code, res.text)
+
     except Exception as e:
-        print("SEND ERROR:", e)
+        print("SEND ERROR:", str(e))
 
 
 # =========================
-# DUMMY ENGINE
+# ENGINE (TEST OR AI)
 # =========================
 def run_engine():
+
     return {
+        "model": "ALPHA_V1_LIVE",
         "regime": "LIVE",
-        "signals": ["SOL", "ETH", "BTC"],
-        "portfolio": [{"symbol": "SOL", "weight": 0.5}]
+        "signals": [
+            {"symbol": "BTC", "score": 1.0},
+            {"symbol": "ETH", "score": 0.9}
+        ],
+        "portfolio": [
+            {"symbol": "BTC", "weight": 0.55},
+            {"symbol": "ETH", "weight": 0.45}
+        ]
     }
+
+
+# =========================
+# FORMAT OUTPUT (IMPORTANT)
+# =========================
+def format_result(result):
+
+    return (
+        f"📊 Alpha Update\n\n"
+        f"Model: {result['model']}\n"
+        f"Regime: {result['regime']}\n\n"
+        f"Signals: {result['signals']}\n\n"
+        f"Portfolio: {result['portfolio']}"
+    )
