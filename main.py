@@ -103,3 +103,12 @@ def auto_fix_suggestions(health):
         fixes.append("⚠ Replace V28/V29 with V32 unified engine")
 
     if "NO_GIT_INFO" in health["issues"]:
+        fixes.append("📡 Add GIT_COMMIT env variable in Render")
+
+    if "UNSTABLE" in health["issues"]:
+        fixes.append("⚠ Restart service + force rebuild")
+
+    if len(fixes) == 0:
+        fixes.append("✅ System healthy")
+
+    return fixes
