@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 import urllib.request
 import json
 import math
+import random
 
 app = FastAPI()
 
@@ -10,18 +11,18 @@ BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
 # =========================
-# MEMORY (QUANT CORE)
+# HEDGE FUND MEMORY
 # =========================
 MEMORY = {
+    "equity": 100.0,
+    "peak": 100.0,
+    "returns": [],
     "weights": {
-        "structure": 0.4,
-        "momentum": 0.3,
-        "volatility": 0.2,
-        "volume": 0.1
-    },
-    "returns_history": [],
-    "equity_curve": [],
-    "peak": 100.0
+        "momentum": 0.35,
+        "structure": 0.30,
+        "volatility": 0.20,
+        "volume": 0.15
+    }
 }
 
 
@@ -31,17 +32,17 @@ MEMORY = {
 @app.get("/")
 def home():
     return {
-        "status": "V25 QUANT CORE ACTIVE",
-        "model": "SOLANA_AI_V25_QUANT"
+        "status": "V26 HEDGE FUND CORE LIVE",
+        "model": "SOLANA_AI_V26_HEDGE_FUND"
     }
 
 
 # =========================
-# UPDATE
+# UPDATE ENDPOINT
 # =========================
 @app.get("/update")
 def update():
-    return run_v25_quant()
+    return run_v26()
 
 
 # =========================
@@ -60,10 +61,10 @@ async def webhook(request: Request):
         return {"ok": False}
 
     if text == "/start":
-        send(chat_id, "🚀 V25 QUANT CORE ACTIVE")
+        send(chat_id, "🚀 V26 HEDGE FUND ACTIVE")
 
     elif text == "/update":
-        result = run_v25_quant()
+        result = run_v26()
         send(chat_id, format(result))
 
     return {"ok": True}
@@ -91,7 +92,6 @@ def fetch_market():
     market = []
 
     for c in data:
-
         market.append({
             "symbol": c["symbol"].upper(),
             "change": c.get("price_change_percentage_24h", 0) or 0,
@@ -103,7 +103,7 @@ def fetch_market():
 
 
 # =========================
-# QUANT SCORE ENGINE
+# SCORE ENGINE (HEDGE FUND STYLE)
 # =========================
 def score(asset, w):
 
@@ -121,46 +121,40 @@ def score(asset, w):
 
 
 # =========================
-# BACKTEST SIMULATION RETURN
+# REGIME DETECTOR
 # =========================
-def simulate_return(top_assets):
+def regime(top):
 
-    # fake but structured return model
-    r = 0
+    avg = sum(x["score"] for x in top) / len(top)
 
-    for a in top_assets:
-
-        r += a["score"] * 0.01
-
-    noise = 0.05 * (r * 0.1)
-
-    return r + noise
+    if avg > 60:
+        return "RISK_ON_EXPANSION"
+    elif avg > 30:
+        return "NEUTRAL_TREND"
+    else:
+        return "RISK_OFF"
 
 
 # =========================
-# SHARPE RATIO (SIMPLIFIED)
+# MONTE CARLO SIMULATION
 # =========================
-def sharpe(returns):
+def monte_carlo(returns):
 
-    if len(returns) < 2:
-        return 0
+    simulations = []
 
-    avg = sum(returns) / len(returns)
+    for _ in range(50):
 
-    variance = sum((x - avg) ** 2 for x in returns) / len(returns)
+        sample = random.sample(returns, len(returns)) if len(returns) > 3 else returns
 
-    std = math.sqrt(variance)
+        simulations.append(sum(sample) / len(sample))
 
-    if std == 0:
-        return 0
-
-    return avg / std
+    return sum(simulations) / len(simulations)
 
 
 # =========================
 # MAIN ENGINE
 # =========================
-def run_v25_quant():
+def run_v26():
 
     market = fetch_market()
 
@@ -183,58 +177,57 @@ def run_v25_quant():
     top5 = signals[:5]
 
     # =========================
-    # QUANT RETURN SIMULATION
+    # RETURN MODEL (SIMPLIFIED)
     # =========================
-    ret = simulate_return(top5)
+    ret = sum(x["score"] for x in top5) / 1000
 
-    MEMORY["returns_history"].append(ret)
+    MEMORY["returns"].append(ret)
 
-    MEMORY["equity_curve"].append(
-        MEMORY["equity_curve"][-1] + ret if MEMORY["equity_curve"] else 100 + ret
-    )
+    MEMORY["equity"] += ret
 
-    # =========================
-    # DRAWDOWN
-    # =========================
-    current = MEMORY["equity_curve"][-1]
+    # peak tracking
+    if MEMORY["equity"] > MEMORY["peak"]:
+        MEMORY["peak"] = MEMORY["equity"]
 
-    if current > MEMORY["peak"]:
-        MEMORY["peak"] = current
+    drawdown = (MEMORY["peak"] - MEMORY["equity"]) / MEMORY["peak"]
 
-    drawdown = (MEMORY["peak"] - current) / MEMORY["peak"]
+    # risk metric (pseudo sharpe)
+    avg_ret = sum(MEMORY["returns"][-10:]) / max(1, len(MEMORY["returns"][-10:]))
+    risk = math.sqrt(sum((x - avg_ret) ** 2 for x in MEMORY["returns"][-10:]) + 1e-9)
 
-    # =========================
-    # SHARPE
-    # =========================
-    sharpe_score = sharpe(MEMORY["returns_history"][-20:])
+    sharpe = avg_ret / risk if risk != 0 else 0
+
+    # Monte Carlo stability check
+    stability = monte_carlo(MEMORY["returns"][-10:])
 
     # =========================
-    # ADAPTIVE WEIGHT UPDATE
+    # WEIGHT ADAPTATION (HEDGE FUND LOGIC)
     # =========================
-    if sharpe_score < 0.5:
+    if sharpe < 0.3:
 
-        MEMORY["weights"]["structure"] += 0.02
-        MEMORY["weights"]["momentum"] += 0.01
-        MEMORY["weights"]["volatility"] -= 0.01
+        w["momentum"] += 0.02
+        w["structure"] += 0.01
+        w["volatility"] -= 0.01
 
     else:
 
-        MEMORY["weights"]["volume"] += 0.01
+        w["volume"] += 0.01
 
     # normalize
-    total = sum(MEMORY["weights"].values())
+    total = sum(w.values())
 
-    for k in MEMORY["weights"]:
-        MEMORY["weights"][k] /= total
+    for k in w:
+        w[k] /= total
 
     return {
-        "model": "SOLANA_AI_V25_QUANT_CORE",
+        "model": "SOLANA_AI_V26_HEDGE_FUND",
+        "regime": regime(top5),
         "signals": top5,
-        "return": round(ret, 4),
-        "sharpe": round(sharpe_score, 4),
+        "equity": round(MEMORY["equity"], 3),
         "drawdown": round(drawdown, 4),
-        "equity": round(MEMORY["equity_curve"][-1], 2),
-        "weights": MEMORY["weights"]
+        "sharpe_like": round(sharpe, 4),
+        "monte_carlo_stability": round(stability, 4),
+        "weights": w
     }
 
 
@@ -262,18 +255,19 @@ def send(chat_id, text):
 # =========================
 # FORMAT OUTPUT
 # =========================
-def format(result):
+def format(r):
 
-    msg = "🚀 V25 QUANT CORE\n\n"
+    msg = "🚀 V26 HEDGE FUND\n\n"
 
-    msg += f"Return: {result['return']}\n"
-    msg += f"Sharpe: {result['sharpe']}\n"
-    msg += f"Drawdown: {result['drawdown']}\n"
-    msg += f"Equity: {result['equity']}\n\n"
+    msg += f"Regime: {r['regime']}\n"
+    msg += f"Equity: {r['equity']}\n"
+    msg += f"Drawdown: {r['drawdown']}\n"
+    msg += f"Sharpe: {r['sharpe_like']}\n"
+    msg += f"Stability: {r['monte_carlo_stability']}\n\n"
 
-    msg += "📊 SIGNALS:\n"
+    msg += "TOP SIGNALS:\n"
 
-    for s in result["signals"]:
+    for s in r["signals"]:
         msg += f"- {s['symbol']} | {s['score']}\n"
 
     return msg
