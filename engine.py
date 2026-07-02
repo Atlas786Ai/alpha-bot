@@ -2,58 +2,68 @@ import requests
 
 def get_market():
 
-    url = "https://api.coingecko.com/api/v3/coins/markets"
+    url = "https://api.binance.com/api/v3/ticker/24hr"
 
-    params = {
-        "vs_currency": "usd",
-        "order": "market_cap_desc",
-        "per_page": 10,
-        "page": 1,
-        "sparkline": False
-    }
-
-    res = requests.get(url, params=params, timeout=10)
-
-    print("STATUS:", res.status_code)
-    print("TEXT:", res.text[:200])
+    res = requests.get(url, timeout=10)
 
     if res.status_code != 200:
         return []
 
-    try:
-        data = res.json()
-    except Exception as e:
-        print("JSON ERROR:", e)
-        return []
+    data = res.json()
 
-    print("DATA TYPE:", type(data))
+    # فقط USDT pairs
+    filtered = []
 
-    return data
+    for c in data:
+
+        if "USDT" in c.get("symbol", ""):
+            filtered.append(c)
+
+    return filtered[:20]
 
 
 def run_engine():
 
     data = get_market()
 
-    print("LEN:", len(data) if isinstance(data, list) else "NO LIST")
-
     signals = []
 
-    for i, c in enumerate(data):
+    for c in data:
 
-        print("COIN:", i, c)
+        try:
+            change = float(c.get("priceChangePercent", 0))
+        except:
+            change = 0
 
-        if not isinstance(c, dict):
-            continue
+        try:
+            volume = float(c.get("quoteVolume", 0))
+        except:
+            volume = 0
 
-        change = c.get("price_change_percentage_24h", 0) or 0
+        score = change + (volume / 1e9)
 
         signals.append({
             "symbol": c.get("symbol"),
-            "score": change
+            "score": round(score, 2)
+        })
+
+    signals = sorted(signals, key=lambda x: x["score"], reverse=True)
+
+    top10 = signals[:10]
+
+    total = sum([abs(s["score"]) + 1 for s in top10]) or 1
+
+    portfolio = []
+
+    for s in top10:
+
+        portfolio.append({
+            "symbol": s["symbol"],
+            "weight": round((abs(s["score"]) + 1) / total, 3)
         })
 
     return {
-        "debug_len": len(data) if isinstance(data, list) else 0,
-        "signals": signals
+        "regime": "LIVE",
+        "signals": top10,
+        "portfolio": portfolio
     }
