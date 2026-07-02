@@ -1,7 +1,10 @@
 import requests
+import math
 
-# --- SOURCE 1: CoinGecko backup (safe endpoint)
-def get_coingecko():
+# ---------------------------
+# DATA
+# ---------------------------
+def get_data():
 
     try:
         url = "https://api.coingecko.com/api/v3/coins/markets"
@@ -9,7 +12,7 @@ def get_coingecko():
         params = {
             "vs_currency": "usd",
             "order": "market_cap_desc",
-            "per_page": 10,
+            "per_page": 20,
             "page": 1,
             "sparkline": False
         }
@@ -19,57 +22,81 @@ def get_coingecko():
         if r.status_code != 200:
             return []
 
-        data = r.json()
-
-        return [
-            {
-                "symbol": c.get("symbol", "").upper(),
-                "change": c.get("price_change_percentage_24h", 0) or 0,
-                "volume": c.get("total_volume", 0) or 0
-            }
-            for c in data
-        ]
+        return r.json()
 
     except:
         return []
 
 
-# --- SOURCE 2: fallback fake market (guaranteed)
-def fallback_market():
+# ---------------------------
+# SAFE
+# ---------------------------
+def safe(x):
+    try:
+        return float(x)
+    except:
+        return 0.0
 
-    return [
-        {"symbol": "BTC", "change": 2.1, "volume": 1000000000},
-        {"symbol": "ETH", "change": 1.5, "volume": 500000000},
-        {"symbol": "SOL", "change": 4.2, "volume": 800000000},
-        {"symbol": "BNB", "change": 1.1, "volume": 300000000}
-    ]
 
-
+# ---------------------------
+# CORE ENGINE (SMART)
+# ---------------------------
 def run_engine():
 
-    data = get_coingecko()
+    data = get_data()
 
-    source = "COINGECKO"
+    if not data:
 
-    if len(data) == 0:
-        data = fallback_market()
-        source = "FALLBACK"
+        return {
+            "regime": "FALLBACK",
+            "signals": [],
+            "portfolio": []
+        }
 
     signals = []
 
     for c in data:
 
-        score = c["change"] * 1.5 + (c["volume"] / 1e9)
+        symbol = c.get("symbol", "").upper()
+
+        price_change_24h = safe(c.get("price_change_percentage_24h"))
+        market_cap = safe(c.get("market_cap"))
+        volume = safe(c.get("total_volume"))
+
+        # ---------------------------
+        # 🧠 SMART FEATURES
+        # ---------------------------
+
+        # momentum (price movement strength)
+        momentum = price_change_24h
+
+        # volume shock (log scaled)
+        volume_score = math.log10(volume + 1)
+
+        # size normalization
+        cap_score = math.log10(market_cap + 1)
+
+        # solana-style heuristic (growth + hype + liquidity)
+        score = (
+            momentum * 2.0 +
+            volume_score * 1.2 +
+            cap_score * 0.8
+        )
 
         signals.append({
-            "symbol": c["symbol"],
-            "score": round(score, 3)
+            "symbol": symbol,
+            "score": round(score, 3),
+            "momentum": round(momentum, 3)
         })
 
+    # sort by smart score
     signals = sorted(signals, key=lambda x: x["score"], reverse=True)
 
     top10 = signals[:10]
 
+    # ---------------------------
+    # PORTFOLIO ALLOCATION
+    # ---------------------------
     total = sum([abs(s["score"]) + 1 for s in top10]) or 1
 
     portfolio = []
@@ -81,9 +108,21 @@ def run_engine():
             "weight": round((abs(s["score"]) + 1) / total, 3)
         })
 
+    # ---------------------------
+    # REGIME DETECTION (SIMPLE)
+    # ---------------------------
+
+    avg_momentum = sum([s["momentum"] for s in top10]) / len(top10)
+
+    if avg_momentum > 3:
+        regime = "RISK_ON"
+    elif avg_momentum < -2:
+        regime = "RISK_OFF"
+    else:
+        regime = "NEUTRAL"
+
     return {
-        "source": source,
-        "regime": "LIVE",
+        "regime": regime,
         "signals": top10,
         "portfolio": portfolio
     }
