@@ -1,47 +1,24 @@
+from fastapi import FastAPI, Request
 import random
-import math
-from datetime import datetime
+
+app = FastAPI()
+
 
 # =========================
-# MEMORY (REAL BACKTEST CORE)
+# HEALTH CHECK
 # =========================
-MEMORY = {
-    "predictions": [],
-    "accuracy_history": [],
-    "weights": {
-        "structure": 0.45,
-        "momentum": 0.30,
-        "volatility": 0.15,
-        "liquidity": 0.10
+@app.get("/")
+def home():
+    return {
+        "status": "ALPHA V22 FALLBACK LIVE",
+        "mode": "NO_EXTERNAL_DEPENDENCY"
     }
-}
 
 
 # =========================
-# SIMULATED MARKET FEED
-# (in real version → CoinGecko)
+# SIMPLE AI ENGINE (NO INTERNET)
 # =========================
-def get_market_data():
-
-    symbols = ["SOL", "ETH", "BTC", "ARB", "AVAX", "DOGE"]
-
-    market = []
-
-    for s in symbols:
-
-        price_change = random.uniform(-10, 10)  # real outcome
-        market.append({
-            "symbol": s,
-            "future_return": price_change
-        })
-
-    return market
-
-
-# =========================
-# V21 ENGINE (PREDICTION)
-# =========================
-def run_engine_v21():
+def run_fallback_engine():
 
     symbols = ["SOL", "ETH", "BTC", "ARB", "AVAX", "DOGE"]
 
@@ -49,104 +26,129 @@ def run_engine_v21():
 
     for s in symbols:
 
-        structure = random.uniform(20, 100)
-        momentum = random.uniform(0, 20)
-        volatility = random.uniform(0.1, 1.0)
-        liquidity = random.uniform(0.5, 1.5)
+        # ساختار مصنوعی ولی پایدار
+        base_score = random.uniform(20, 100)
 
-        score = (
-            structure * MEMORY["weights"]["structure"] +
-            momentum * MEMORY["weights"]["momentum"] +
-            (1 / (volatility + 0.01)) * MEMORY["weights"]["volatility"] +
-            liquidity * MEMORY["weights"]["liquidity"]
-        )
+        momentum = random.uniform(0, 15)
+
+        volatility = random.uniform(0.1, 1.0)
+
+        # سولانا-لایک امتیاز ساده ولی پایدار
+        score = base_score + (momentum * 2) + (1 / (volatility + 0.01)) * 0.5
 
         signals.append({
             "symbol": s,
-            "score": round(score, 4)
+            "score": round(score, 4),
+            "momentum": round(momentum, 2),
+            "volatility": round(volatility, 3)
         })
 
     signals.sort(key=lambda x: x["score"], reverse=True)
 
     top5 = signals[:5]
 
-    prediction = {
-        "timestamp": datetime.utcnow().isoformat(),
-        "model": "SOLANA_AI_V21_BACKTEST_CORE",
-        "predicted_top": [x["symbol"] for x in top5],
-        "signals": top5
-    }
+    total = sum(x["score"] for x in top5)
 
-    MEMORY["predictions"].append(prediction)
-
-    return prediction
-
-
-# =========================
-# BACKTEST ENGINE
-# =========================
-def run_backtest():
-
-    market = get_market_data()
-
-    correct = 0
-    total = len(MEMORY["predictions"])
-
-    if total == 0:
-        return {"status": "no predictions yet"}
-
-    last_pred = MEMORY["predictions"][-1]
-
-    predicted = last_pred["predicted_top"]
-
-    # evaluate correctness
-    for m in market:
-
-        if m["symbol"] in predicted and m["future_return"] > 0:
-            correct += 1
-
-    accuracy = correct / len(predicted)
-
-    MEMORY["accuracy_history"].append(accuracy)
-
-    # =========================
-    # SELF LEARNING UPDATE
-    # =========================
-    if len(MEMORY["accuracy_history"]) > 2:
-
-        avg_acc = sum(MEMORY["accuracy_history"][-5:]) / min(5, len(MEMORY["accuracy_history"]))
-
-        # adjust weights based on performance
-        if avg_acc < 0.4:
-            MEMORY["weights"]["structure"] += 0.02
-            MEMORY["weights"]["momentum"] += 0.02
-        else:
-            MEMORY["weights"]["volatility"] += 0.01
-            MEMORY["weights"]["liquidity"] += 0.01
-
-        # normalize weights
-        total_w = sum(MEMORY["weights"].values())
-        for k in MEMORY["weights"]:
-            MEMORY["weights"][k] /= total_w
+    portfolio = [
+        {
+            "symbol": x["symbol"],
+            "weight": round(x["score"] / total, 3)
+        }
+        for x in top5
+    ]
 
     return {
-        "model": "SOLANA_AI_V21_BACKTEST_CORE",
-        "accuracy": accuracy,
-        "market_eval": market,
-        "weights": MEMORY["weights"]
+        "model": "ALPHA_V22_FALLBACK_CORE",
+        "regime": "STABLE_SIMULATION",
+        "signals": top5,
+        "portfolio": portfolio
     }
 
 
 # =========================
-# COMBINED ENGINE (MAIN CALL)
+# UPDATE ENDPOINT
 # =========================
-def run_engine_v21_full():
+@app.get("/update")
+def update():
+    return run_fallback_engine()
 
-    prediction = run_engine_v21()
-    backtest = run_backtest()
 
-    return {
-        "prediction": prediction,
-        "backtest": backtest,
-        "memory": MEMORY
+# =========================
+# TELEGRAM WEBHOOK (SAFE)
+# =========================
+@app.post("/webhook")
+async def webhook(request: Request):
+
+    data = await request.json()
+
+    print("DEBUG:", data)
+
+    message = data.get("message", {})
+    text = message.get("text", "")
+    chat_id = message.get("chat", {}).get("id")
+
+    if not chat_id:
+        return {"ok": False}
+
+    if text == "/start":
+        send_message(chat_id, "🚀 ALPHA V22 FALLBACK ACTIVE")
+
+    elif text == "/update":
+        result = run_fallback_engine()
+        send_message(chat_id, format_message(result))
+
+    return {"ok": True}
+
+
+# =========================
+# TELEGRAM SEND (NO REQUESTS LIB)
+# =========================
+import urllib.request
+import json
+
+BOT_TOKEN = "PUT_YOUR_BOT_TOKEN_HERE"
+BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+
+def send_message(chat_id, text):
+
+    url = f"{BASE_URL}/sendMessage"
+
+    data = {
+        "chat_id": chat_id,
+        "text": text
     }
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(data).encode("utf-8"),
+        headers={"Content-Type": "application/json"}
+    )
+
+    try:
+        urllib.request.urlopen(req)
+    except Exception as e:
+        print("SEND ERROR:", e)
+
+
+# =========================
+# FORMAT MESSAGE
+# =========================
+def format_message(result):
+
+    msg = "🚀 ALPHA V22 FALLBACK\n\n"
+
+    msg += f"Model: {result['model']}\n"
+    msg += f"Regime: {result['regime']}\n\n"
+
+    msg += "📊 TOP SIGNALS:\n"
+
+    for s in result["signals"]:
+        msg += f"- {s['symbol']} | score: {s['score']}\n"
+
+    msg += "\n💼 PORTFOLIO:\n"
+
+    for p in result["portfolio"]:
+        msg += f"- {p['symbol']}: {p['weight']}\n"
+
+    return msg
