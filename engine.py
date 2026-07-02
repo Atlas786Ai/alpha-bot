@@ -9,17 +9,20 @@ def get_market():
     if res.status_code != 200:
         return []
 
-    data = res.json()
+    try:
+        data = res.json()
+    except:
+        return []
 
-    # فقط USDT pairs
-    filtered = []
+    return data
 
-    for c in data:
 
-        if "USDT" in c.get("symbol", ""):
-            filtered.append(c)
+def safe_float(x):
 
-    return filtered[:20]
+    try:
+        return float(x)
+    except:
+        return 0.0
 
 
 def run_engine():
@@ -30,28 +33,42 @@ def run_engine():
 
     for c in data:
 
-        try:
-            change = float(c.get("priceChangePercent", 0))
-        except:
-            change = 0
+        symbol = c.get("symbol", "")
 
-        try:
-            volume = float(c.get("quoteVolume", 0))
-        except:
-            volume = 0
+        # فقط USDT pairs
+        if "USDT" not in symbol:
+            continue
 
-        score = change + (volume / 1e9)
+        change = safe_float(c.get("priceChangePercent"))
+        volume = safe_float(c.get("quoteVolume"))
+
+        # normalize واقعی
+        score = change * 1.5 + (volume / 1e9)
 
         signals.append({
-            "symbol": c.get("symbol"),
-            "score": round(score, 2)
+            "symbol": symbol,
+            "score": round(score, 3)
         })
+
+    # اگر باز هم خالی بود → fallback واقعی
+    if not signals:
+        return {
+            "regime": "FALLBACK",
+            "signals": [
+                {"symbol": "BTCUSDT", "score": 1.0},
+                {"symbol": "ETHUSDT", "score": 0.9}
+            ],
+            "portfolio": [
+                {"symbol": "BTCUSDT", "weight": 0.55},
+                {"symbol": "ETHUSDT", "weight": 0.45}
+            ]
+        }
 
     signals = sorted(signals, key=lambda x: x["score"], reverse=True)
 
     top10 = signals[:10]
 
-    total = sum([abs(s["score"]) + 1 for s in top10]) or 1
+    total = sum([abs(s["score"]) + 1 for s in top10])
 
     portfolio = []
 
