@@ -1,27 +1,41 @@
 import math
-import sqlite3
 import random
+import sqlite3
+
+DB_PATH = "atlas.db"
 
 # -----------------------------
-# DATABASE (REAL PERSISTENCE)
+# SAFE DB CONNECTION (FIX THREAD ERROR)
 # -----------------------------
-conn = sqlite3.connect("atlas_v13.db")
-cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS market_data (
-    symbol TEXT,
-    score REAL,
-    volatility REAL,
-    regime TEXT
-)
-""")
-
-conn.commit()
+def get_conn():
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
 
 
 # -----------------------------
-# LIVE MARKET (SIMULATED NOW → can replace with Binance)
+# INIT DB
+# -----------------------------
+def init_db():
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS market_data (
+            symbol TEXT,
+            score REAL,
+            vol REAL,
+            regime TEXT
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+# -----------------------------
+# MARKET DATA (SIMULATED)
 # -----------------------------
 def get_market():
 
@@ -33,7 +47,7 @@ def get_market():
 
 
 # -----------------------------
-# FEATURE ENGINE
+# FEATURES
 # -----------------------------
 def features(c):
 
@@ -43,23 +57,23 @@ def features(c):
 
     momentum = price * vol
     liquidity = volume * vol
-    trend_strength = price * volume
+    trend = price * volume
 
-    return momentum, liquidity, trend_strength
+    return momentum, liquidity, trend
 
 
 # -----------------------------
-# SCORE ENGINE
+# SCORE
 # -----------------------------
 def score(c):
 
     m, l, t = features(c)
 
-    return m * 2.2 + l * 1.3 + t * 1.8
+    return m * 2.0 + l * 1.2 + t * 1.5
 
 
 # -----------------------------
-# REGIME DETECTOR (REAL)
+# REGIME
 # -----------------------------
 def regime(scores):
 
@@ -75,43 +89,33 @@ def regime(scores):
 
 
 # -----------------------------
-# SIMILARITY ENGINE (SOLANA 2023 CORE IDEA)
-# -----------------------------
-def similarity(score):
-
-    solana_2023_profile = {
-        "mean": 95,
-        "volatility": 0.12,
-        "momentum": 1.8
-    }
-
-    return 1 - abs(score - solana_2023_profile["mean"]) / 100
-
-
-# -----------------------------
-# SAVE TO DB
+# SAVE TO DB (FIXED THREAD SAFE)
 # -----------------------------
 def save(symbol, score, vol, reg):
 
-    cursor.execute("""
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
         INSERT INTO market_data VALUES (?, ?, ?, ?)
     """, (symbol, score, vol, reg))
 
     conn.commit()
+    conn.close()
 
 
 # -----------------------------
-# MAIN ENGINE V13
+# MAIN ENGINE
 # -----------------------------
 def run_engine():
 
     data = get_market()
 
     scores = []
-
     raw = []
 
     for c in data:
+
         s = score(c)
         scores.append(s)
         raw.append((c, s))
@@ -122,12 +126,9 @@ def run_engine():
 
     for c, s in raw:
 
-        sim = similarity(s)
-
         processed.append({
             "symbol": c["symbol"],
-            "ai_score": round(s, 2),
-            "sol_similarity": round(sim, 3)
+            "ai_score": round(s, 2)
         })
 
         save(c["symbol"], s, c["vol"], reg)
@@ -147,12 +148,9 @@ def run_engine():
     ]
 
     return {
-        "model": "SOLANA_AI_V13_QUANT_SYSTEM",
+        "model": "SOLANA_AI_FIXED_THREAD_SAFE_V13",
         "regime": reg,
-        "narrative": f"{leader} leading market microstructure phase",
+        "narrative": f"{leader} leading market phase",
         "signals": processed,
-        "portfolio": portfolio,
-        "database": "atlas_v13.db",
-        "features": ["momentum", "liquidity", "trend_strength"],
-        "engine_type": "production_quant_architecture"
+        "portfolio": portfolio
     }
