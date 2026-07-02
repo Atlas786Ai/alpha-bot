@@ -25,91 +25,74 @@ def get_market():
     return data
 
 
-def solana_similarity(c):
+def safe(c, key):
 
-    change = c.get("price_change_percentage_24h", 0) or 0
-    vol = c.get("total_volume", 0) or 0
-    mc = c.get("market_cap", 1) or 1
-
-    # normalize درست
-    liquidity_ratio = (vol / mc) if mc > 0 else 0
-
-    # scaling واقعی
-    momentum = change * 1.0
-    liquidity = liquidity_ratio * 50   # مهم: scale شد
-
-    return momentum + liquidity
+    v = c.get(key, 0)
+    if v is None:
+        return 0
+    return v
 
 
-def market_regime(data):
+def compute_raw(c):
 
-    changes = [(c.get("price_change_percentage_24h", 0) or 0) for c in data]
+    change = safe(c, "price_change_percentage_24h")
+    vol = safe(c, "total_volume")
+    mc = safe(c, "market_cap")
 
-    avg = sum(changes) / len(changes) if changes else 0
+    if mc == 0:
+        mc = 1
 
-    if avg > 2:
-        return "BULL"
-    elif avg < -2:
-        return "BEAR"
-    return "NEUTRAL"
+    liquidity = vol / mc
 
-
-def action(score):
-
-    if score > 15:
-        return "SOLANA BREAKOUT 🚀"
-    elif score > 8:
-        return "STRONG BUY"
-    elif score > 3:
-        return "BUY"
-    elif score > 0:
-        return "WATCH"
-    else:
-        return "NOISE"
+    return {
+        "symbol": c.get("symbol", "unknown"),
+        "change": change,
+        "liquidity": liquidity
+    }
 
 
 def run_engine():
 
     data = get_market()
 
-    regime = market_regime(data)
+    processed = [compute_raw(c) for c in data]
+
+    # ❗ ranking-based normalization
+    changes = sorted([p["change"] for p in processed], reverse=True)
+    liqs = sorted([p["liquidity"] for p in processed], reverse=True)
 
     signals = []
 
-    for c in data:
+    for p in processed:
 
-        if not isinstance(c, dict):
-            continue
+        # rank score instead of raw math
+        change_rank = changes.index(p["change"]) if p["change"] in changes else 0
+        liq_rank = liqs.index(p["liquidity"]) if p["liquidity"] in liqs else 0
 
-        score = solana_similarity(c)
+        score = (len(processed) - change_rank) * 0.6 + (len(processed) - liq_rank) * 0.4
 
         signals.append({
-            "symbol": c.get("symbol", "unknown"),
-            "score": round(score, 2),
-            "action": action(score)
+            "symbol": p["symbol"],
+            "score": round(score, 2)
         })
 
-    # مهم: حداقل threshold حذف شد
     signals = sorted(signals, key=lambda x: x["score"], reverse=True)
 
     top10 = signals[:10]
 
-    total = sum([abs(s["score"]) + 1 for s in top10])
+    total = sum([s["score"] for s in top10]) or 1
 
     portfolio = []
 
     for s in top10:
 
-        weight = (abs(s["score"]) + 1) / total
-
         portfolio.append({
             "symbol": s["symbol"],
-            "weight": round(weight, 3),
-            "action": s["action"]
+            "weight": round(s["score"] / total, 3)
         })
 
     return {
-        "regime": regime,
+        "regime": "NEUTRAL",
         "signals": top10,
         "portfolio": portfolio
     }
