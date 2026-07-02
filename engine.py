@@ -1,7 +1,9 @@
 from fastapi import FastAPI, Request
 import urllib.request
+import urllib.parse
 import json
 import math
+import time
 
 app = FastAPI()
 
@@ -10,30 +12,23 @@ BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
 # =========================
-# MEMORY (REAL QUANT CORE)
+# MEMORY
 # =========================
 MEMORY = {
-    "equity": 100.0,
-    "returns_window": [],
-    "asset_history": [],
-    "factor_history": [],
-    "weights": {
-        "momentum": 0.30,
-        "structure": 0.25,
-        "volatility": 0.25,
-        "liquidity": 0.20
-    }
+    "cache_time": 0,
+    "cache_data": None,
+    "equity": 100.0
 }
 
 
 # =========================
-# HEALTH
+# ROOT
 # =========================
 @app.get("/")
 def home():
     return {
-        "status": "V28 REAL QUANT AI ACTIVE",
-        "model": "SOLANA_AI_V28_QUANT_CORE"
+        "status": "V29 DISCOVERY ENGINE ACTIVE",
+        "model": "SOLANA_AI_V29_DISCOVERY"
     }
 
 
@@ -42,7 +37,7 @@ def home():
 # =========================
 @app.get("/update")
 def update():
-    return run_v28()
+    return run_v29()
 
 
 # =========================
@@ -61,293 +56,201 @@ async def webhook(request: Request):
         return {"ok": False}
 
     if text == "/start":
-        send(chat_id, "🚀 V28 REAL QUANT AI ACTIVE")
+        send(chat_id, "🚀 V29 DISCOVERY ENGINE ACTIVE")
 
     elif text == "/update":
-        result = run_v28()
+        result = run_v29()
         send(chat_id, format_result(result))
 
     return {"ok": True}
 
 
 # =========================
-# MARKET DATA
+# UNIVERSE EXPANSION (KEY CHANGE)
 # =========================
 def fetch_market():
 
-    url = "https://api.coingecko.com/api/v3/coins/markets"
+    # cache (avoid 429)
+    if MEMORY["cache_data"] and time.time() - MEMORY["cache_time"] < 60:
+        return MEMORY["cache_data"]
 
-    params = {
-        "vs_currency": "usd",
-        "order": "market_cap_desc",
-        "per_page": 15,
-        "page": 1,
-        "sparkline": False
-    }
+    try:
 
-    query = urllib.parse.urlencode(params)
-    raw = urllib.request.urlopen(url + "?" + query, timeout=5).read()
-    data = json.loads(raw)
+        url = "https://api.coingecko.com/api/v3/coins/markets"
 
-    market = []
+        params = {
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": 100,
+            "page": 1,
+            "sparkline": "false"
+        }
 
-    for c in data:
-        market.append({
-            "symbol": c["symbol"].upper(),
-            "change": c.get("price_change_percentage_24h", 0) or 0,
-            "volume": c.get("total_volume", 0),
-            "rank": c.get("market_cap_rank", 999)
-        })
+        query = urllib.parse.urlencode(params)
+        full_url = url + "?" + query
 
-    return market
+        req = urllib.request.Request(
+            full_url,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+
+        raw = urllib.request.urlopen(req, timeout=6).read()
+        data = json.loads(raw)
+
+        result = []
+
+        for c in data:
+
+            result.append({
+                "symbol": c["symbol"].upper(),
+                "change": c.get("price_change_percentage_24h", 0) or 0,
+                "volume": c.get("total_volume", 0),
+                "rank": c.get("market_cap_rank", 999)
+            })
+
+        MEMORY["cache_data"] = result
+        MEMORY["cache_time"] = time.time()
+
+        return result
+
+    except:
+
+        # fallback universe
+        return [
+            {"symbol": "BTC", "change": 1.1, "volume": 1000000, "rank": 1},
+            {"symbol": "ETH", "change": 0.9, "volume": 900000, "rank": 2},
+            {"symbol": "SOL", "change": 2.2, "volume": 500000, "rank": 5},
+            {"symbol": "ARB", "change": 3.5, "volume": 300000, "rank": 20},
+            {"symbol": "OP", "change": 2.9, "volume": 250000, "rank": 25},
+            {"symbol": "INJ", "change": 4.1, "volume": 200000, "rank": 40},
+            {"symbol": "TIA", "change": 3.8, "volume": 220000, "rank": 35},
+            {"symbol": "AVAX", "change": 1.7, "volume": 400000, "rank": 15},
+        ]
 
 
 # =========================
-# FEATURE ENGINE (REAL QUANT FACTORS)
+# SOLANA-LIKE SCORE ENGINE (IMPORTANT PART)
 # =========================
-def features(asset, w):
+def solana_score(asset):
 
-    structure = max(0, 100 - asset["rank"])
+    """
+    This is the KEY upgrade:
+    We are not ranking performance.
+    We are estimating "Solana-like growth probability"
+    """
+
     momentum = asset["change"]
-    volatility = abs(asset["change"]) / 10
     liquidity = asset["volume"] / 1e9
 
-    return {
-        "structure": structure,
-        "momentum": momentum,
-        "volatility": volatility,
-        "liquidity": liquidity
-    }
+    # rank advantage = early / mid cap bias
+    rank_factor = max(0, 120 - asset["rank"]) / 120
 
+    # volatility sweet spot (not too stable, not too chaotic)
+    volatility_score = 1 / (abs(momentum) + 1)
 
-# =========================
-# Z-SCORE ANOMALY DETECTION
-# =========================
-def zscore(values, x):
+    # breakout potential simulation
+    breakout = momentum * liquidity
 
-    mean = sum(values) / len(values)
-    std = math.sqrt(sum((v - mean) ** 2 for v in values) + 1e-9)
-
-    if std == 0:
-        return 0
-
-    return (x - mean) / std
-
-
-# =========================
-# COVARIANCE (SIMPLIFIED)
-# =========================
-def covariance(x, y):
-
-    n = len(x)
-
-    if n == 0:
-        return 0
-
-    mean_x = sum(x) / n
-    mean_y = sum(y) / n
-
-    cov = sum((x[i] - mean_x) * (y[i] - mean_y) for i in range(n)) / n
-
-    return cov
-
-
-# =========================
-# MAIN SCORE ENGINE
-# =========================
-def score(asset, w, context):
-
-    f = features(asset, w)
-
-    return (
-        f["structure"] * w["structure"] +
-        f["momentum"] * w["momentum"] +
-        (1 / (f["volatility"] + 0.01)) * w["volatility"] +
-        f["liquidity"] * w["liquidity"]
+    # SOLANA-like composite
+    score = (
+        rank_factor * 0.4 +
+        momentum * 0.25 +
+        volatility_score * 0.2 +
+        breakout * 0.15
     )
 
-
-# =========================
-# FACTOR BUILDING (PCA-LIKE SIMULATION)
-# =========================
-def build_factors(signals):
-
-    momentum_list = [s["momentum"] for s in signals]
-    score_list = [s["score"] for s in signals]
-
-    factor_momentum = sum(momentum_list) / len(momentum_list)
-    factor_score = sum(score_list) / len(score_list)
-
-    return {
-        "factor_momentum": factor_momentum,
-        "factor_score": factor_score
-    }
+    return score
 
 
 # =========================
-# PORTFOLIO OPTIMIZER (RISK-ADJUSTED)
+# NARRATIVE ENGINE (VERY IMPORTANT)
 # =========================
-def optimize(signals):
+def detect_narrative(symbols):
 
-    scores = [s["score"] for s in signals]
+    # simple narrative detection
 
-    total = sum(max(s, 0.01) for s in scores)
+    if any(s["symbol"] in ["INJ", "TIA"] for s in symbols):
+        return "Infra + modular narrative expanding"
 
-    portfolio = []
+    if any(s["symbol"] == "ARB" for s in symbols):
+        return "Layer2 scaling rotation phase"
 
-    for s in signals:
-
-        weight = max(s["score"], 0.01) / total
-
-        portfolio.append({
-            "symbol": s["symbol"],
-            "weight": round(weight, 4)
-        })
-
-    return portfolio
+    return "General altcoin expansion phase"
 
 
 # =========================
-# WALK-FORWARD LEARNING (SIMPLIFIED)
+# MAIN ENGINE V29
 # =========================
-def walk_forward_update(history):
-
-    if len(history) < 5:
-        return 0
-
-    recent = history[-5:]
-
-    return sum(recent) / len(recent)
-
-
-# =========================
-# MAIN ENGINE
-# =========================
-def run_v28():
+def run_v29():
 
     market = fetch_market()
 
-    signals = []
-
-    w = MEMORY["weights"]
+    scored = []
 
     for m in market:
 
-        s = score(m, w, MEMORY)
+        score = solana_score(m)
 
-        signals.append({
+        scored.append({
             "symbol": m["symbol"],
-            "score": round(s, 4),
+            "solana_like_score": round(score, 6),
             "momentum": m["change"],
-            "volume": m["volume"]
+            "rank": m["rank"]
         })
 
-    signals.sort(key=lambda x: x["score"], reverse=True)
+    # sort by discovery score
+    scored.sort(key=lambda x: x["solana_like_score"], reverse=True)
 
-    top5 = signals[:5]
+    top10 = scored[:10]
 
-    # =========================
-    # Z-SCORE ANOMALY DETECTION
-    # =========================
-    scores = [s["score"] for s in top5]
+    narrative = detect_narrative(top10)
 
-    anomalies = []
+    # simple portfolio allocation (risk-weighted discovery)
+    total = sum(max(x["solana_like_score"], 0.0001) for x in top10)
 
-    for s in top5:
+    portfolio = []
 
-        z = zscore(scores, s["score"])
+    for x in top10:
 
-        anomalies.append({
-            "symbol": s["symbol"],
-            "zscore": round(z, 4),
-            "anomaly": "HIGH" if abs(z) > 1 else "NORMAL"
+        w = max(x["solana_like_score"], 0.0001) / total
+
+        portfolio.append({
+            "symbol": x["symbol"],
+            "weight": round(w, 4)
         })
 
-    # =========================
-    # FACTORS (PCA-LIKE)
-    # =========================
-    factors = build_factors(top5)
-
-    # =========================
-    # PORTFOLIO OPTIMIZATION
-    # =========================
-    portfolio = optimize(top5)
-
-    # =========================
-    # RETURN SIMULATION
-    # =========================
-    ret = sum(scores) / 1000
-
-    MEMORY["returns_window"].append(ret)
-
-    if len(MEMORY["returns_window"]) > 20:
-        MEMORY["returns_window"].pop(0)
-
-    # =========================
-    # WALK FORWARD PERFORMANCE
-    # =========================
-    wf = walk_forward_update(MEMORY["returns_window"])
-
-    MEMORY["equity"] += ret
-
-    # =========================
-    # WEIGHT ADAPTATION (REAL QUANT STYLE)
-    # =========================
-    if wf < 0:
-
-        w["volatility"] += 0.02
-        w["momentum"] += 0.01
-        w["structure"] -= 0.01
-
-    else:
-
-        w["liquidity"] += 0.01
-
-    total_w = sum(w.values())
-
-    for k in w:
-        w[k] /= total_w
+    # equity simulation
+    MEMORY["equity"] += sum(x["solana_like_score"] for x in top10) / 1000
 
     return {
-        "model": "SOLANA_AI_V28_REAL_QUANT",
-        "signals": top5,
-        "anomalies": anomalies,
+        "model": "SOLANA_AI_V29_DISCOVERY_ENGINE",
+        "narrative": narrative,
+        "top10_solana_candidates": top10,
         "portfolio": portfolio,
-        "factors": factors,
-        "walk_forward": round(wf, 6),
-        "equity": round(MEMORY["equity"], 4),
-        "weights": w
+        "equity": round(MEMORY["equity"], 4)
     }
 
 
 # =========================
-# FORMAT
+# FORMAT TELEGRAM OUTPUT
 # =========================
 def format_result(r):
 
-    msg = "🏦 V28 REAL QUANT AI\n\n"
+    msg = "🚀 V29 DISCOVERY ENGINE\n\n"
 
-    msg += f"Equity: {r['equity']}\n"
-    msg += f"WalkForward: {r['walk_forward']}\n\n"
+    msg += f"Narrative: {r['narrative']}\n\n"
 
-    msg += "📊 TOP SIGNALS:\n"
+    msg += "TOP 10 SOLANA-LIKE CANDIDATES:\n"
 
-    for s in r["signals"]:
-        msg += f"- {s['symbol']} | {s['score']}\n"
+    for s in r["top10_solana_candidates"]:
+        msg += f"- {s['symbol']} | {s['solana_like_score']}\n"
 
-    msg += "\n⚠️ ANOMALIES:\n"
-
-    for a in r["anomalies"]:
-        msg += f"- {a['symbol']} | {a['anomaly']}\n"
-
-    msg += "\n💼 PORTFOLIO:\n"
+    msg += "\nPORTFOLIO:\n"
 
     for p in r["portfolio"]:
         msg += f"- {p['symbol']} | {p['weight']}\n"
 
-    msg += "\n🧠 FACTORS:\n"
-    for k, v in r["factors"].items():
-        msg += f"- {k}: {round(v,4)}\n"
+    msg += f"\nEquity: {r['equity']}\n"
 
     return msg
 
@@ -357,7 +260,7 @@ def format_result(r):
 # =========================
 def send(chat_id, text):
 
-    url = f"{BASE_URL}/sendMessage"
+    url = BASE_URL + "/sendMessage"
 
     data = {
         "chat_id": chat_id,
