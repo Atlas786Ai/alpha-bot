@@ -1,22 +1,19 @@
 from fastapi import FastAPI
-import json
 import urllib.request
-import math
+import urllib.parse
+import json
+import time
 
 app = FastAPI()
 
 
 # =========================
-# MODEL STATE
+# STATE
 # =========================
 STATE = {
-    "weights": {
-        "momentum": 0.35,
-        "trend": 0.35,
-        "volatility": 0.30
-    },
-    "learning_rate": 0.08,
-    "error_memory": []
+    "cache_time": 0,
+    "cache_data": None,
+    "equity": 100.0
 }
 
 
@@ -26,177 +23,187 @@ STATE = {
 @app.get("/")
 def home():
     return {
-        "status": "V31 REAL BACKTEST ENGINE ACTIVE",
-        "model": "SOLANA_AI_V31_BACKTEST"
+        "status": "V32 REAL UNIVERSE ENGINE ACTIVE",
+        "model": "SOLANA_AI_V32_UNIVERSE_DISCOVERY"
     }
 
 
 # =========================
-# SIMULATED 2023 DATA ENGINE
+# UPDATE
 # =========================
-def load_2023_market():
+@app.get("/update")
+def update():
+    return run_v32()
 
-    """
-    Real-world approximation of 2023 crypto cycles
-    (not exact prices, but structured behavior)
-    """
 
-    return {
-        "Q1": {
-            "BTC": 0.25,
-            "ETH": 0.18,
-            "SOL": 0.42,
-            "ARB": 0.55,
-            "DOGE": 0.12,
-            "AVAX": 0.30
-        },
-        "Q2": {
-            "BTC": 0.15,
-            "ETH": 0.22,
-            "SOL": 0.35,
-            "ARB": 0.20,
-            "DOGE": 0.10,
-            "AVAX": 0.18
-        },
-        "Q3": {
-            "BTC": 0.28,
-            "ETH": 0.20,
-            "SOL": 0.60,
-            "ARB": 0.45,
-            "DOGE": 0.14,
-            "AVAX": 0.33
-        },
-        "Q4": {
-            "BTC": 0.40,
-            "ETH": 0.32,
-            "SOL": 0.85,
-            "ARB": 0.72,
-            "DOGE": 0.22,
-            "AVAX": 0.41
+# =========================
+# MARKET UNIVERSE (100 COINS)
+# =========================
+def fetch_market():
+
+    # cache (anti 429)
+    if STATE["cache_data"] and time.time() - STATE["cache_time"] < 60:
+        return STATE["cache_data"]
+
+    try:
+
+        url = "https://api.coingecko.com/api/v3/coins/markets"
+
+        params = {
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": 100,   # 👈 KEY CHANGE
+            "page": 1,
+            "sparkline": "false"
         }
-    }
 
+        query = urllib.parse.urlencode(params)
+        full_url = url + "?" + query
 
-# =========================
-# CORE SCORING FUNCTION
-# =========================
-def score(asset_return, weights):
+        req = urllib.request.Request(
+            full_url,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
 
-    return (
-        asset_return * weights["momentum"] +
-        asset_return ** 0.5 * weights["trend"] -
-        abs(asset_return) * 0.1 * weights["volatility"]
-    )
+        raw = urllib.request.urlopen(req, timeout=6).read()
+        data = json.loads(raw)
 
+        universe = []
 
-# =========================
-# BACKTEST ENGINE (CORE)
-# =========================
-def run_backtest():
+        for c in data:
 
-    market = load_2023_market()
-    w = STATE["weights"]
+            universe.append({
+                "symbol": c["symbol"].upper(),
+                "change": c.get("price_change_percentage_24h", 0) or 0,
+                "volume": c.get("total_volume", 0),
+                "rank": c.get("market_cap_rank", 999)
+            })
 
-    coins = ["BTC", "ETH", "SOL", "ARB", "DOGE", "AVAX"]
+        STATE["cache_data"] = universe
+        STATE["cache_time"] = time.time()
 
-    results = {
-        "Q1": {},
-        "Q2": {},
-        "Q3": {},
-        "Q4": {},
-        "final_ranking": {},
-        "trajectory_score": {}
-    }
+        return universe
 
-    # =========================
-    # STEP 1: QUARTER ANALYSIS
-    # =========================
-    for q in market:
+    except:
 
-        quarter_scores = {}
-
-        for c in coins:
-
-            s = score(market[q][c], w)
-
-            quarter_scores[c] = s
-
-        results[q] = quarter_scores
-
-
-    # =========================
-    # STEP 2: TRAJECTORY CALCULATION
-    # =========================
-    for c in coins:
-
-        path = [
-            market["Q1"][c],
-            market["Q2"][c],
-            market["Q3"][c],
-            market["Q4"][c]
+        # fallback universe (expanded)
+        return [
+            {"symbol": "BTC", "change": 1.1, "volume": 1000000, "rank": 1},
+            {"symbol": "ETH", "change": 0.9, "volume": 900000, "rank": 2},
+            {"symbol": "SOL", "change": 2.2, "volume": 500000, "rank": 5},
+            {"symbol": "ARB", "change": 3.1, "volume": 300000, "rank": 20},
+            {"symbol": "AVAX", "change": 1.7, "volume": 400000, "rank": 15},
+            {"symbol": "OP", "change": 2.4, "volume": 250000, "rank": 25},
+            {"symbol": "INJ", "change": 4.0, "volume": 200000, "rank": 40},
+            {"symbol": "TIA", "change": 3.6, "volume": 220000, "rank": 35},
+            {"symbol": "MATIC", "change": 1.9, "volume": 600000, "rank": 12},
+            {"symbol": "DOGE", "change": 1.5, "volume": 700000, "rank": 10},
         ]
 
-        trend = sum(path) / len(path)
 
-        stability = 1 - (max(path) - min(path))
+# =========================
+# SOLANA-LIKE DISCOVERY SCORE
+# =========================
+def solana_like_score(asset):
 
-        trajectory = (trend * 0.7) + (stability * 0.3)
+    """
+    Core idea:
+    We are NOT ranking performance.
+    We are estimating "future structural breakout probability"
+    """
 
-        results["trajectory_score"][c] = trajectory
+    momentum = asset["change"]
+    volume = asset["volume"] / 1e9
 
+    # early/mid cap advantage
+    rank_pressure = max(0, 120 - asset["rank"]) / 120
 
-    # =========================
-    # STEP 3: MODEL ERROR ANALYSIS
-    # =========================
-    sorted_coins = sorted(
-        results["trajectory_score"].items(),
-        key=lambda x: x[1],
-        reverse=True
+    # stability sweet spot
+    stability = 1 / (abs(momentum) + 1)
+
+    # liquidity expansion signal
+    liquidity = volume
+
+    # breakout potential
+    breakout = momentum * liquidity
+
+    score = (
+        rank_pressure * 0.40 +
+        momentum * 0.25 +
+        stability * 0.20 +
+        breakout * 0.15
     )
 
-    predicted_top = [x[0] for x in sorted_coins[:3]]
-    actual_top = ["SOL", "ARB", "ETH"]
-
-    error = len(set(predicted_top) - set(actual_top)) / 3
-
-    STATE["error_memory"].append(error)
-
-    if len(STATE["error_memory"]) > 10:
-        STATE["error_memory"].pop(0)
+    return score
 
 
-    # =========================
-    # STEP 4: SELF-LEARNING UPDATE
-    # =========================
-    avg_error = sum(STATE["error_memory"]) / len(STATE["error_memory"])
+# =========================
+# NARRATIVE ENGINE
+# =========================
+def narrative_engine(top10):
 
-    if avg_error > 0.4:
+    symbols = [x["symbol"] for x in top10]
 
-        # adjust weights
-        w["trend"] += 0.02
-        w["momentum"] -= 0.01
-        w["volatility"] += 0.01
+    if "INJ" in symbols or "TIA" in symbols:
+        return "Infra / modular narrative expansion phase"
 
-    else:
+    if "ARB" in symbols:
+        return "Layer2 rotation cycle active"
 
-        w["momentum"] += 0.01
-        w["trend"] += 0.01
+    if "SOL" in symbols:
+        return "L1 high-beta continuation phase"
+
+    return "General market expansion phase"
 
 
-    # normalize weights
-    total = sum(w.values())
+# =========================
+# MAIN ENGINE V32
+# =========================
+def run_v32():
 
-    for k in w:
-        w[k] /= total
+    market = fetch_market()
 
+    scored = []
+
+    for m in market:
+
+        score = solana_like_score(m)
+
+        scored.append({
+            "symbol": m["symbol"],
+            "solana_like_score": round(score, 6),
+            "rank": m["rank"],
+            "momentum": m["change"]
+        })
+
+    # sort discovery
+    scored.sort(key=lambda x: x["solana_like_score"], reverse=True)
+
+    top10 = scored[:10]
+
+    narrative = narrative_engine(top10)
+
+    # portfolio allocation
+    total = sum(max(x["solana_like_score"], 0.0001) for x in top10)
+
+    portfolio = []
+
+    for x in top10:
+
+        portfolio.append({
+            "symbol": x["symbol"],
+            "weight": round(x["solana_like_score"] / total, 4)
+        })
+
+    # equity simulation
+    STATE["equity"] += sum(x["solana_like_score"] for x in top10) / 1000
 
     return {
-        "model": "SOLANA_AI_V31_BACKTEST_ENGINE",
-        "trajectory": results["trajectory_score"],
-        "predicted_top3": predicted_top,
-        "error_rate": round(error, 4),
-        "avg_error": round(avg_error, 4),
-        "weights": w
+        "model": "SOLANA_AI_V32_UNIVERSE_DISCOVERY",
+        "narrative": narrative,
+        "top10_solana_candidates": top10,
+        "portfolio": portfolio,
+        "equity": round(STATE["equity"], 4)
     }
 
 
@@ -205,5 +212,4 @@ def run_backtest():
 # =========================
 @app.get("/backtest")
 def backtest():
-
-    return run_backtest()
+    return run_v32()
