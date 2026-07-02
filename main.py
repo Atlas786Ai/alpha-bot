@@ -9,4 +9,4 @@ def home():
 
 @app.get("/update")
 def update():
-    return run_engine()
+    return {"DEBUG": "HIT UPDATE"}
