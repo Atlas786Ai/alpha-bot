@@ -2,21 +2,21 @@ import math
 import random
 
 # -----------------------------
-# SAFE MARKET DATA (NO FAILS)
+# MARKET DATA (stable simulation)
 # -----------------------------
 def get_data():
 
     return [
-        {"symbol": "DOGE", "price_change": random.uniform(-2, 15), "volume": random.uniform(8e8, 2e9), "vol": random.uniform(0.05, 0.22)},
-        {"symbol": "SOL", "price_change": random.uniform(-1, 12), "volume": random.uniform(9e8, 2e9), "vol": random.uniform(0.03, 0.15)},
-        {"symbol": "ARB", "price_change": random.uniform(-2, 10), "volume": random.uniform(4e8, 1.5e9), "vol": random.uniform(0.04, 0.18)},
+        {"symbol": "SOL", "price_change": random.uniform(-1, 14), "volume": random.uniform(9e8, 2e9), "vol": random.uniform(0.03, 0.15)},
+        {"symbol": "ARB", "price_change": random.uniform(-2, 12), "volume": random.uniform(4e8, 1.5e9), "vol": random.uniform(0.04, 0.2)},
         {"symbol": "ETH", "price_change": random.uniform(-1, 8), "volume": random.uniform(1e9, 2.5e9), "vol": random.uniform(0.01, 0.08)},
-        {"symbol": "AVAX", "price_change": random.uniform(-2, 9), "volume": random.uniform(3e8, 1.2e9), "vol": random.uniform(0.03, 0.2)},
+        {"symbol": "AVAX", "price_change": random.uniform(-2, 10), "volume": random.uniform(3e8, 1.2e9), "vol": random.uniform(0.03, 0.2)},
+        {"symbol": "DOGE", "price_change": random.uniform(-3, 16), "volume": random.uniform(8e8, 2e9), "vol": random.uniform(0.05, 0.25)},
     ]
 
 
 # -----------------------------
-# SAFE FEATURE ENGINE
+# FEATURE ENGINE (V7)
 # -----------------------------
 def features(c):
 
@@ -24,57 +24,79 @@ def features(c):
     volume = math.log10(c.get("volume", 1) + 1)
     vol = c.get("vol", 0.1)
 
-    breakout = momentum * vol * 10
-    liquidity = volume * vol
+    trend_strength = momentum * (1 - vol)
+    liquidity_pressure = volume * vol
+    acceleration = momentum * vol * 10
 
-    return momentum, volume, vol, breakout, liquidity
-
-
-# -----------------------------
-# SAFE SCORE (NO EXPLOSION)
-# -----------------------------
-def score(c):
-
-    m, v, vol, b, l = features(c)
-
-    return (
-        b * 2.0 +
-        l * 1.2 +
-        math.log1p(abs(m)) * 1.5
-    )
+    return momentum, volume, vol, trend_strength, liquidity_pressure, acceleration
 
 
 # -----------------------------
-# REGIME (ROBUST VERSION)
+# MARKET HEAT INDEX
 # -----------------------------
-def regime(scores):
+def market_heat(scores):
 
     if not scores:
-        return "CHOP_MARKET"
+        return 0
 
     avg = sum(scores) / len(scores)
     spread = max(scores) - min(scores)
 
-    if avg > 6 and spread > 4:
+    heat = (avg * 0.6) + (spread * 0.4)
+
+    return round(heat, 3)
+
+
+# -----------------------------
+# REGIME DETECTION (IMPROVED V7)
+# -----------------------------
+def detect_regime(scores, heat):
+
+    if heat > 8:
         return "EXPLOSIVE_ROTATION"
-    elif avg > 3:
+    elif heat > 4:
         return "HIGH_BETA_TREND"
-    elif avg > 1:
-        return "EARLY_ACCUMULATION"
+    elif heat > 1.5:
+        return "ACCUMULATION"
     else:
         return "CHOP_MARKET"
 
 
 # -----------------------------
-# CONFIDENCE (SAFE)
+# ANOMALY PRESSURE INDEX
 # -----------------------------
-def confidence(vol):
+def anomaly_index(momentum, vol):
 
-    return round(1 / (1 + vol), 3)
+    return abs(momentum) * vol * 10
 
 
 # -----------------------------
-# MAIN ENGINE (NO MEMORY DEPENDENCY → ZERO CRASH)
+# SCORE FUNCTION (V7)
+# -----------------------------
+def score(c):
+
+    m, v, vol, trend, liquidity, accel = features(c)
+
+    return (
+        trend * 2.0 +
+        liquidity * 1.4 +
+        accel * 1.8 +
+        math.log1p(abs(m)) * 1.2
+    )
+
+
+# -----------------------------
+# PORTFOLIO ALLOCATION (V7 SMART RISK)
+# -----------------------------
+def weight(score, vol):
+
+    risk_adj = 1 / (1 + vol)
+
+    return (abs(score) + 1) * risk_adj
+
+
+# -----------------------------
+# MAIN ENGINE V7
 # -----------------------------
 def run_engine():
 
@@ -82,20 +104,25 @@ def run_engine():
 
     signals = []
     scores = []
+    anomalies = []
 
     for c in data:
 
         s = score(c)
         scores.append(s)
 
-        vol = c.get("vol", 0.1)
+        m, v, vol, trend, liquidity, accel = features(c)
+
+        anomaly = anomaly_index(m, vol)
+        anomalies.append(anomaly)
 
         signals.append({
             "symbol": c["symbol"],
             "ai_score": round(s, 3),
-            "momentum": round(c.get("price_change", 0), 3),
+            "momentum": round(m, 3),
             "vol": round(vol, 3),
-            "confidence": confidence(vol)
+            "trend_strength": round(trend, 3),
+            "anomaly_pressure": round(anomaly, 3)
         })
 
     # ranking
@@ -103,27 +130,47 @@ def run_engine():
 
     top = signals[:5]
 
-    total = sum([abs(x["ai_score"]) + 1 for x in top]) or 1
-
-    portfolio = []
+    # portfolio weights
+    raw_weights = []
 
     for s in top:
 
+        vol = s["vol"]
+        w = weight(s["ai_score"], vol)
+
+        raw_weights.append(w)
+
+    total = sum(raw_weights) or 1
+
+    portfolio = []
+
+    for i, s in enumerate(top):
+
         portfolio.append({
             "symbol": s["symbol"],
-            "weight": round((abs(s["ai_score"]) + 1) / total, 3)
+            "weight": round(raw_weights[i] / total, 3)
         })
 
-    reg = regime(scores)
+    # market intelligence layer
+    heat = market_heat(scores)
+    regime = detect_regime(scores, heat)
 
+    # regime transition logic (very important V7 feature)
     leader = top[0]["symbol"]
 
-    narrative = f"{leader} leading flow in {reg} phase"
+    narrative_map = {
+        "EXPLOSIVE_ROTATION": f"{leader} leading aggressive expansion cycle",
+        "HIGH_BETA_TREND": f"{leader} driving momentum continuation",
+        "ACCUMULATION": f"{leader} showing structured accumulation",
+        "CHOP_MARKET": "market in consolidation / uncertainty phase"
+    }
 
     return {
-        "model": "SOLANA_AI_V6_STABLE",
-        "regime": reg,
-        "narrative": narrative,
+        "model": "SOLANA_AI_V7_INTELLIGENCE",
+        "regime": regime,
+        "market_heat": heat,
+        "narrative": narrative_map[regime],
         "signals": top,
-        "portfolio": portfolio
+        "portfolio": portfolio,
+        "anomaly_avg": round(sum(anomalies) / len(anomalies), 3)
     }
