@@ -10,7 +10,3 @@ def home():
 @app.get("/update")
 def update():
     return run_engine()
-
-@app.post("/webhook")
-async def webhook(request: Request):
-    return {"ok": True}
