@@ -1,19 +1,37 @@
 import math
 import random
+import json
+import os
 
 # -----------------------------
-# GLOBAL MEMORY (STATEFUL)
+# PERSISTENT MEMORY (NEW)
 # -----------------------------
-MEMORY = {
-    "last_scores": {},
-    "leader_count": {},
-    "performance": {},   # NEW: correctness tracking
-    "strategy_weights": {
-        "momentum": 2.0,
-        "liquidity": 1.2,
-        "volatility": 1.5
+MEMORY_FILE = "memory_v12.json"
+
+def load_memory():
+
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f:
+            return json.load(f)
+
+    return {
+        "history": [],
+        "performance": {},
+        "strategy_weights": {
+            "momentum": 2.0,
+            "liquidity": 1.2,
+            "volatility": 1.5
+        }
     }
-}
+
+
+def save_memory(mem):
+
+    with open(MEMORY_FILE, "w") as f:
+        json.dump(mem, f)
+
+
+MEMORY = load_memory()
 
 
 # -----------------------------
@@ -22,11 +40,11 @@ MEMORY = {
 def get_data():
 
     return [
-        {"symbol": "ARB", "price_change": random.uniform(-2, 20), "volume": random.uniform(6e8, 2e9), "vol": random.uniform(0.04, 0.25)},
+        {"symbol": "ARB", "price_change": random.uniform(-2, 22), "volume": random.uniform(6e8, 2e9), "vol": random.uniform(0.04, 0.25)},
+        {"symbol": "DOGE", "price_change": random.uniform(-3, 20), "volume": random.uniform(8e8, 2e9), "vol": random.uniform(0.05, 0.3)},
         {"symbol": "SOL", "price_change": random.uniform(-1, 16), "volume": random.uniform(9e8, 2e9), "vol": random.uniform(0.03, 0.18)},
         {"symbol": "ETH", "price_change": random.uniform(-1, 10), "volume": random.uniform(1e9, 2.5e9), "vol": random.uniform(0.01, 0.09)},
         {"symbol": "AVAX", "price_change": random.uniform(-2, 12), "volume": random.uniform(4e8, 1.5e9), "vol": random.uniform(0.03, 0.2)},
-        {"symbol": "DOGE", "price_change": random.uniform(-4, 22), "volume": random.uniform(7e8, 2e9), "vol": random.uniform(0.05, 0.3)},
     ]
 
 
@@ -47,7 +65,7 @@ def features(c):
 
 
 # -----------------------------
-# DYNAMIC SCORE (V11 CORE)
+# SCORE ENGINE (V12)
 # -----------------------------
 def score(c):
 
@@ -55,57 +73,53 @@ def score(c):
 
     w = MEMORY["strategy_weights"]
 
-    return (
-        mom * w["momentum"] +
-        liq * w["liquidity"] +
-        acc * w["volatility"]
-    )
+    return mom * w["momentum"] + liq * w["liquidity"] + acc * w["volatility"]
 
 
 # -----------------------------
-# PERFORMANCE UPDATE (NEW)
+# RISK ADJUSTED SCORE (SHARPE-LIKE)
 # -----------------------------
-def update_performance(symbol, predicted_leader):
+def risk_adjusted(score, vol):
 
-    perf = MEMORY["performance"].get(symbol, {"correct": 0, "wrong": 0})
-
-    if symbol == predicted_leader:
-        perf["correct"] += 1
-    else:
-        perf["wrong"] += 1
-
-    MEMORY["performance"][symbol] = perf
+    return score / (vol + 0.05)
 
 
 # -----------------------------
-# CONFIDENCE CALIBRATION (NEW)
+# BACKTEST SIMULATOR (NEW CORE)
 # -----------------------------
-def confidence(symbol):
+def backtest(symbol, score):
 
-    perf = MEMORY["performance"].get(symbol, {"correct": 1, "wrong": 1})
+    hist = MEMORY["history"][-20:]  # last 20 states
 
-    total = perf["correct"] + perf["wrong"]
+    wins = 0
+    total = 0
 
-    return round(perf["correct"] / total, 3)
+    for h in hist:
+        if h["symbol"] == symbol:
+            total += 1
+            if h["score"] < score:
+                wins += 1
+
+    if total == 0:
+        return 0.5
+
+    return wins / total
 
 
 # -----------------------------
-# LEARNING UPDATE (STRATEGY EVOLUTION)
+# STRATEGY EVOLUTION (LEARNING)
 # -----------------------------
-def evolve_strategy(mean, spread):
+def evolve_weights(mean, spread):
 
     w = MEMORY["strategy_weights"]
 
-    # if market is volatile → momentum matters more
     if spread > 40:
-        w["momentum"] *= 1.02
-        w["volatility"] *= 1.03
-
-    # if calm market → liquidity matters more
+        w["momentum"] *= 1.03
+        w["volatility"] *= 1.02
     else:
         w["liquidity"] *= 1.01
 
-    # normalize (important)
+    # normalize
     total = sum(w.values())
 
     for k in w:
@@ -113,28 +127,20 @@ def evolve_strategy(mean, spread):
 
 
 # -----------------------------
-# FILTER SIGNALS (VALIDATION LAYER)
-# -----------------------------
-def filter_signal(score, mean):
-
-    return score > mean * 0.5
-
-
-# -----------------------------
-# NEXT REGIME
+# REGIME DETECTION
 # -----------------------------
 def regime(mean, spread):
 
-    if spread > 45:
+    if spread > 60:
         return "EXPLOSIVE_ROTATION"
-    elif mean > 60:
+    elif mean > 55:
         return "HIGH_BETA_TREND"
     else:
-        return "CHOP"
+        return "CHOP_OR_ACCUMULATION"
 
 
 # -----------------------------
-# MAIN ENGINE V11
+# MAIN ENGINE V12
 # -----------------------------
 def run_engine():
 
@@ -149,32 +155,39 @@ def run_engine():
     mean = sum(raw) / len(raw)
     spread = max(raw) - min(raw)
 
-    evolve_strategy(mean, spread)
+    evolve_weights(mean, spread)
 
     processed = []
 
     for i, c in enumerate(data):
 
+        symbol = c["symbol"]
         s = raw[i]
 
-        symbol = c["symbol"]
-
-        if not filter_signal(s, mean):
-            continue
+        ra = risk_adjusted(s, c["vol"])
+        bt = backtest(symbol, s)
 
         processed.append({
             "symbol": symbol,
             "ai_score": round(s, 2),
-            "confidence": confidence(symbol)
+            "risk_adj_score": round(ra, 2),
+            "backtest_winrate": round(bt, 2)
         })
 
     processed = sorted(processed, key=lambda x: x["ai_score"], reverse=True)
 
     leader = processed[0]["symbol"]
 
-    # UPDATE LEARNING MEMORY
+    # SAVE HISTORY (NEW)
     for p in processed:
-        update_performance(p["symbol"], leader)
+        MEMORY["history"].append({
+            "symbol": p["symbol"],
+            "score": p["ai_score"]
+        })
+
+    MEMORY["history"] = MEMORY["history"][-200:]  # keep last 200
+
+    save_memory(MEMORY)
 
     total = sum([x["ai_score"] + 1 for x in processed]) or 1
 
@@ -187,15 +200,14 @@ def run_engine():
     ]
 
     return {
-        "model": "SOLANA_AI_V11_SELF_EVOLVING",
+        "model": "SOLANA_AI_V12_QUANT_CORE",
         "regime": regime(mean, spread),
-        "narrative": f"{leader} leading adaptive market phase",
+        "narrative": f"{leader} leading adaptive quant cycle",
         "signals": processed,
         "portfolio": portfolio,
         "market_stats": {
             "mean": round(mean, 2),
             "spread": round(spread, 2)
         },
-        "strategy_weights": MEMORY["strategy_weights"],
-        "learning_memory": MEMORY["performance"]
+        "strategy_weights": MEMORY["strategy_weights"]
     }
