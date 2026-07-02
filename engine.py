@@ -1,7 +1,8 @@
 from fastapi import FastAPI, Request
-import random
 import urllib.request
 import json
+import random
+import math
 
 app = FastAPI()
 
@@ -13,12 +14,17 @@ BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
 # =========================
-# MEMORY (SELF-LEARNING)
+# MEMORY (ML CORE)
 # =========================
 MEMORY = {
-    "mode_used": [],
-    "last_accuracy": 0.5,
-    "fail_count": 0
+    "weights": {
+        "structure": 0.35,
+        "momentum": 0.35,
+        "volatility": 0.20,
+        "volume": 0.10
+    },
+    "history": [],
+    "accuracy": []
 }
 
 
@@ -28,19 +34,17 @@ MEMORY = {
 @app.get("/")
 def home():
     return {
-        "status": "V23 HYBRID LIVE",
-        "mode": "AUTO SWITCH ENABLED"
+        "status": "V24 ML CORE ACTIVE",
+        "model": "SOLANA_AI_V24_MACHINE_LEARNING"
     }
 
 
 # =========================
-# MAIN UPDATE ENDPOINT
+# UPDATE ENDPOINT
 # =========================
 @app.get("/update")
 def update():
-
-    data = run_hybrid_engine()
-    return data
+    return run_v24_ml()
 
 
 # =========================
@@ -59,50 +63,26 @@ async def webhook(request: Request):
         return {"ok": False}
 
     if text == "/start":
-        send_message(chat_id, "🚀 V23 HYBRID AI ACTIVE")
+        send_message(chat_id, "🚀 V24 ML CORE ACTIVE")
 
     elif text == "/update":
-        result = run_hybrid_engine()
+        result = run_v24_ml()
         send_message(chat_id, format_result(result))
 
     return {"ok": True}
 
 
 # =========================
-# HYBRID ENGINE (LIVE + FALLBACK)
+# LIVE MARKET (CoinGecko)
 # =========================
-def run_hybrid_engine():
-
-    try:
-        data = fetch_live_market()
-
-        MEMORY["mode_used"].append("LIVE")
-
-        return build_ai_output(data, mode="LIVE")
-
-    except Exception as e:
-
-        print("LIVE FAILED → switching fallback:", e)
-
-        MEMORY["fail_count"] += 1
-        MEMORY["mode_used"].append("FALLBACK")
-
-        data = generate_fallback_market()
-
-        return build_ai_output(data, mode="FALLBACK")
-
-
-# =========================
-# LIVE DATA (CoinGecko)
-# =========================
-def fetch_live_market():
+def fetch_market():
 
     url = "https://api.coingecko.com/api/v3/coins/markets"
 
     params = {
         "vs_currency": "usd",
         "order": "market_cap_desc",
-        "per_page": 20,
+        "per_page": 15,
         "page": 1,
         "sparkline": False
     }
@@ -111,8 +91,7 @@ def fetch_live_market():
     full_url = url + "?" + query
 
     response = urllib.request.urlopen(full_url, timeout=5)
-    raw = response.read()
-    data = json.loads(raw)
+    data = json.loads(response.read())
 
     market = []
 
@@ -129,51 +108,44 @@ def fetch_live_market():
 
 
 # =========================
-# FALLBACK DATA
+# ML SCORING ENGINE
 # =========================
-def generate_fallback_market():
+def ml_score(asset):
 
-    symbols = ["SOL", "ETH", "BTC", "ARB", "AVAX", "DOGE"]
+    w = MEMORY["weights"]
 
-    market = []
+    structure = max(0, 100 - asset["rank"])
+    momentum = asset["change"]
+    volatility = abs(asset["change"]) / 10
+    volume = asset["volume"] / 1e9
 
-    for s in symbols:
+    score = (
+        structure * w["structure"] +
+        momentum * w["momentum"] +
+        (1 / (volatility + 0.01)) * w["volatility"] +
+        volume * w["volume"]
+    )
 
-        market.append({
-            "symbol": s,
-            "change": random.uniform(-5, 5),
-            "rank": random.randint(1, 100),
-            "volume": random.uniform(1e8, 1e9)
-        })
-
-    return market
+    return score
 
 
 # =========================
-# AI CORE SCORING
+# MAIN ENGINE
 # =========================
-def build_ai_output(market, mode="LIVE"):
+def run_v24_ml():
+
+    market = fetch_market()
 
     signals = []
 
     for m in market:
 
-        structure = max(0, 100 - m["rank"])
-        momentum = m["change"]
-        volatility = abs(m["change"]) / 10
-        volume = m["volume"] / 1e9
-
-        score = (
-            structure * 0.4 +
-            momentum * 2.2 +
-            (1 / (volatility + 0.01)) * 0.8 +
-            volume * 0.6
-        )
+        score = ml_score(m)
 
         signals.append({
             "symbol": m["symbol"],
             "score": round(score, 4),
-            "momentum": round(momentum, 3),
+            "momentum": m["change"],
             "rank": m["rank"]
         })
 
@@ -181,23 +153,50 @@ def build_ai_output(market, mode="LIVE"):
 
     top5 = signals[:5]
 
-    total = sum(x["score"] for x in top5)
+    # store history (for learning)
+    MEMORY["history"].append(top5)
 
-    portfolio = [
-        {
-            "symbol": x["symbol"],
-            "weight": round(x["score"] / total, 3)
-        }
-        for x in top5
-    ]
+    # run ML update
+    update_weights(top5)
 
     return {
-        "model": "SOLANA_AI_V23_HYBRID",
-        "mode": mode,
-        "fail_count": MEMORY["fail_count"],
+        "model": "SOLANA_AI_V24_ML_CORE",
         "signals": top5,
-        "portfolio": portfolio
+        "weights": MEMORY["weights"],
+        "history_size": len(MEMORY["history"])
     }
+
+
+# =========================
+# MACHINE LEARNING UPDATE (KEY PART)
+# =========================
+def update_weights(top5):
+
+    # simulate reward signal (real future would be backtest return)
+    reward = sum([x["score"] for x in top5]) / len(top5)
+
+    # error signal
+    error = 100 - reward
+
+    # adaptive learning rate
+    lr = 0.01
+
+    # gradient-like update (simple but real ML concept)
+    if error > 0:
+
+        MEMORY["weights"]["structure"] += lr * (error * 0.01)
+        MEMORY["weights"]["momentum"] += lr * (error * 0.02)
+        MEMORY["weights"]["volatility"] -= lr * (error * 0.01)
+        MEMORY["weights"]["volume"] += lr * (error * 0.005)
+
+    # normalize weights
+    total = sum(MEMORY["weights"].values())
+
+    for k in MEMORY["weights"]:
+        MEMORY["weights"][k] /= total
+
+    # store accuracy proxy
+    MEMORY["accuracy"].append(1 / (1 + abs(error)))
 
 
 # =========================
@@ -218,30 +217,27 @@ def send_message(chat_id, text):
         headers={"Content-Type": "application/json"}
     )
 
-    try:
-        urllib.request.urlopen(req)
-    except Exception as e:
-        print("SEND ERROR:", e)
+    urllib.request.urlopen(req)
 
 
 # =========================
-# FORMAT RESULT
+# FORMAT MESSAGE
 # =========================
 def format_result(result):
 
-    msg = "🚀 V23 HYBRID AI\n\n"
+    msg = "🚀 V24 ML CORE\n\n"
 
-    msg += f"Mode: {result['mode']}\n"
-    msg += f"Fail Count: {result['fail_count']}\n\n"
+    msg += f"Model: {result['model']}\n"
+    msg += f"History: {result['history_size']}\n\n"
 
     msg += "📊 TOP SIGNALS:\n"
 
     for s in result["signals"]:
         msg += f"- {s['symbol']} | score: {s['score']}\n"
 
-    msg += "\n💼 PORTFOLIO:\n"
+    msg += "\n🧠 WEIGHTS:\n"
 
-    for p in result["portfolio"]:
-        msg += f"- {p['symbol']}: {p['weight']}\n"
+    for k, v in result["weights"].items():
+        msg += f"- {k}: {round(v,4)}\n"
 
     return msg
