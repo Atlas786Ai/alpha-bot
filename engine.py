@@ -1,6 +1,20 @@
 import requests
+import time
+
+CACHE = {
+    "data": None,
+    "time": 0
+}
 
 def get_market():
+
+    global CACHE
+
+    now = time.time()
+
+    # cache برای 60 ثانیه (خیلی مهم)
+    if CACHE["data"] and now - CACHE["time"] < 60:
+        return CACHE["data"]
 
     url = "https://api.coingecko.com/api/v3/coins/markets"
 
@@ -14,27 +28,36 @@ def get_market():
 
     res = requests.get(url, params=params)
 
-    print("STATUS:", res.status_code)
-    print("TEXT:", res.text[:500])  # فقط 500 کاراکتر اول
+    # اگر rate limit خوردیم
+    if res.status_code != 200:
+        return CACHE["data"] or []
 
-    return res.json()
+    data = res.json()
+
+    CACHE["data"] = data
+    CACHE["time"] = now
+
+    return data
 
 
 def run_engine():
 
     data = get_market()
 
-    print("DATA TYPE:", type(data))
-    print("DATA SAMPLE:", data[:1] if isinstance(data, list) else data)
-
     results = []
 
     for c in data:
 
-        if isinstance(c, dict):
-            results.append({
-                "symbol": c.get("symbol"),
-                "score": c.get("price_change_percentage_24h", 0) or 0
-            })
+        if not isinstance(c, dict):
+            continue
+
+        score = c.get("price_change_percentage_24h", 0) or 0
+
+        results.append({
+            "symbol": c.get("symbol", "unknown"),
+            "score": round(score, 2)
+        })
+
+    results.sort(key=lambda x: x["score"], reverse=True)
 
     return {"top10": results}
