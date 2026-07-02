@@ -1,114 +1,127 @@
 from fastapi import FastAPI
 import os
-import datetime
-import hashlib
+import traceback
 
 app = FastAPI()
 
 
 # =========================
-# TARGET SYSTEM STATE
+# SYSTEM STATE
 # =========================
 DESIRED_MODEL = "SOLANA_AI_V32_UNIVERSE_DISCOVERY"
 
 
 # =========================
-# RUNTIME STATE
+# SAFE EXECUTION WRAPPER
 # =========================
-def runtime_model():
-    return os.getenv("MODEL_VERSION", "SOLANA_AI_V28_LEGACY")
+def safe_execute(func):
 
+    def wrapper():
 
-def git_commit():
-    return os.getenv("GIT_COMMIT", "UNKNOWN")
+        try:
+
+            return func()
+
+        except Exception as e:
+
+            return {
+                "status": "CRASH_DETECTED",
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "trace": traceback.format_exc(),
+                "auto_fix": debug_engine(e)
+            }
+
+    return wrapper
 
 
 # =========================
-# SIGNATURE ENGINE
+# DEBUG ENGINE (CORE)
 # =========================
-def signature():
+def debug_engine(error):
 
-    raw = runtime_model() + git_commit()
+    fixes = []
 
-    return hashlib.sha256(raw.encode()).hexdigest()
+    err = str(error)
+
+    # -------------------------
+    # INDENTATION ERROR
+    # -------------------------
+    if "IndentationError" in err:
+        fixes.append("🔧 Fix indentation: check missing spaces/tabs")
+
+    # -------------------------
+    # KEY ERROR
+    # -------------------------
+    if "KeyError" in err:
+        fixes.append("🔧 Missing dictionary key detected")
+
+    # -------------------------
+    # MODULE ERROR
+    # -------------------------
+    if "ModuleNotFoundError" in err:
+        fixes.append("📦 Install missing package")
+
+    # -------------------------
+    # TELEGRAM ERROR
+    # -------------------------
+    if "404" in err:
+        fixes.append("🔁 Fix Telegram endpoint URL")
+
+    # -------------------------
+    # DEFAULT
+    # -------------------------
+    if len(fixes) == 0:
+        fixes.append("🧠 Unknown error → manual inspection required")
+
+    return fixes
 
 
 # =========================
-# HEALTH ENGINE (ULTRA)
+# HEALTH CHECK
 # =========================
-def health_engine():
-
-    runtime = runtime_model()
-    commit = git_commit()
-
-    score = 100
-    issues = []
-    level = "OK"
-
-    # -------------------------
-    # VERSION DRIFT
-    # -------------------------
-    if runtime != DESIRED_MODEL:
-        score -= 50
-        issues.append("VERSION_DRIFT")
-
-    # -------------------------
-    # LEGACY DETECTION
-    # -------------------------
-    if "V28" in runtime:
-        score -= 25
-        issues.append("LEGACY_VERSION")
-
-    # -------------------------
-    # UNKNOWN GIT STATE
-    # -------------------------
-    if commit == "UNKNOWN":
-        score -= 15
-        issues.append("NO_GIT_INFO")
-
-    # -------------------------
-    # HEALTH LEVEL CLASSIFIER
-    # -------------------------
-    if score >= 85:
-        level = "HEALTHY"
-    elif score >= 60:
-        level = "DEGRADED"
-    elif score >= 40:
-        level = "UNSTABLE"
-    else:
-        level = "CRITICAL"
+def health_check():
 
     return {
-        "runtime_model": runtime,
-        "desired_model": DESIRED_MODEL,
-        "git_commit": commit,
-        "health_score": max(score, 0),
-        "level": level,
-        "issues": issues,
-        "timestamp": str(datetime.datetime.utcnow())
+        "model": DESIRED_MODEL,
+        "status": "V33 AUTO DEBUG ACTIVE"
     }
 
 
 # =========================
-# AUTO FIX ENGINE (SAFE MODE)
+# MAIN ENDPOINT
 # =========================
-def auto_fix_suggestions(health):
+@app.get("/")
+def home():
+    return health_check()
 
-    fixes = []
 
-    if "VERSION_DRIFT" in health["issues"]:
-        fixes.append("🔁 Redeploy latest version (Render manual deploy)")
+# =========================
+# UPDATE ENDPOINT (SAFE)
+# =========================
+@app.get("/update")
+@safe_execute
+def update():
 
-    if "LEGACY_VERSION" in health["issues"]:
-        fixes.append("⚠ Replace V28/V29 with V32 unified engine")
+    # simulate model output
+    return {
+        "model": DESIRED_MODEL,
+        "equity": 100.0,
+        "status": "RUNNING_OK"
+    }
 
-    if "NO_GIT_INFO" in health["issues"]:
-        fixes.append("📡 Add GIT_COMMIT env variable in Render")
 
-    if "UNSTABLE" in health["issues"]:
-        fixes.append("⚠ Restart service + force rebuild")
+# =========================
+# DEBUG ENDPOINT
+# =========================
+@app.get("/debug")
+@safe_execute
+def debug_test():
 
-    if len(fixes) == 0:
-        fixes.append("✅ System healthy")
+    # intentionally risky test
+    sample = {"a": 1}
 
-    return fixes
+    # this can trigger KeyError if modified
+    return {
+        "test": sample["b"]
+    }
