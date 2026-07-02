@@ -2,11 +2,17 @@ import math
 import random
 
 # -----------------------------
-# MEMORY (in-memory simulation)
+# GLOBAL MEMORY (STATEFUL)
 # -----------------------------
 MEMORY = {
     "last_scores": {},
-    "leader_count": {}
+    "leader_count": {},
+    "performance": {},   # NEW: correctness tracking
+    "strategy_weights": {
+        "momentum": 2.0,
+        "liquidity": 1.2,
+        "volatility": 1.5
+    }
 }
 
 
@@ -37,163 +43,159 @@ def features(c):
     liquidity = v * vol
     acceleration = m * vol * 10
 
-    return m, v, vol, momentum, liquidity, acceleration
+    return momentum, liquidity, acceleration
 
 
 # -----------------------------
-# BASE SCORE
+# DYNAMIC SCORE (V11 CORE)
 # -----------------------------
-def base_score(c):
+def score(c):
 
-    m, v, vol, mom, liq, acc = features(c)
+    mom, liq, acc = features(c)
 
-    return mom * 2.1 + acc * 1.9 + liq * 1.2
+    w = MEMORY["strategy_weights"]
 
-
-# -----------------------------
-# TIME DELTA (learning signal)
-# -----------------------------
-def time_delta(symbol, score):
-
-    last = MEMORY["last_scores"].get(symbol, score)
-
-    delta = score - last
-
-    MEMORY["last_scores"][symbol] = score
-
-    return delta
+    return (
+        mom * w["momentum"] +
+        liq * w["liquidity"] +
+        acc * w["volatility"]
+    )
 
 
 # -----------------------------
-# STABILITY SCORE
+# PERFORMANCE UPDATE (NEW)
 # -----------------------------
-def stability(symbol, score):
+def update_performance(symbol, predicted_leader):
 
-    last = MEMORY["last_scores"].get(symbol, score)
+    perf = MEMORY["performance"].get(symbol, {"correct": 0, "wrong": 0})
 
-    diff = abs(score - last)
-
-    return max(0, 1 - diff / 50)
-
-
-# -----------------------------
-# LEARNING ADJUSTMENT
-# -----------------------------
-def learning_adjust(symbol, score):
-
-    count = MEMORY["leader_count"].get(symbol, 0)
-
-    penalty = count * 0.03
-
-    return score * (1 - penalty)
-
-
-# -----------------------------
-# ANOMALY SCORE
-# -----------------------------
-def anomaly(score, mean):
-
-    return abs(score - mean) / (mean + 1)
-
-
-# -----------------------------
-# CLUSTERING (V10 simplified)
-# -----------------------------
-def cluster(score, vol):
-
-    if score > 70 and vol < 0.1:
-        return "MOMENTUM_LEADER"
-    elif score > 40:
-        return "ROTATION_CORE"
-    elif vol > 0.18:
-        return "HIGH_RISK"
+    if symbol == predicted_leader:
+        perf["correct"] += 1
     else:
-        return "MEAN_REVERSION"
+        perf["wrong"] += 1
+
+    MEMORY["performance"][symbol] = perf
 
 
 # -----------------------------
-# NEXT REGIME PREDICTION
+# CONFIDENCE CALIBRATION (NEW)
 # -----------------------------
-def next_regime(avg, spread):
+def confidence(symbol):
+
+    perf = MEMORY["performance"].get(symbol, {"correct": 1, "wrong": 1})
+
+    total = perf["correct"] + perf["wrong"]
+
+    return round(perf["correct"] / total, 3)
+
+
+# -----------------------------
+# LEARNING UPDATE (STRATEGY EVOLUTION)
+# -----------------------------
+def evolve_strategy(mean, spread):
+
+    w = MEMORY["strategy_weights"]
+
+    # if market is volatile → momentum matters more
+    if spread > 40:
+        w["momentum"] *= 1.02
+        w["volatility"] *= 1.03
+
+    # if calm market → liquidity matters more
+    else:
+        w["liquidity"] *= 1.01
+
+    # normalize (important)
+    total = sum(w.values())
+
+    for k in w:
+        w[k] = round(w[k] / total * 3, 3)
+
+
+# -----------------------------
+# FILTER SIGNALS (VALIDATION LAYER)
+# -----------------------------
+def filter_signal(score, mean):
+
+    return score > mean * 0.5
+
+
+# -----------------------------
+# NEXT REGIME
+# -----------------------------
+def regime(mean, spread):
 
     if spread > 45:
         return "EXPLOSIVE_ROTATION"
-    elif avg > 60:
+    elif mean > 60:
         return "HIGH_BETA_TREND"
     else:
-        return "CHOP_OR_ACCUMULATION"
+        return "CHOP"
 
 
 # -----------------------------
-# MAIN ENGINE V10
+# MAIN ENGINE V11
 # -----------------------------
 def run_engine():
 
     data = get_data()
 
     raw = []
-    processed = []
 
     for c in data:
 
-        score = base_score(c)
-
-        score = learning_adjust(c["symbol"], score)
-
-        raw.append(score)
+        raw.append(score(c))
 
     mean = sum(raw) / len(raw)
     spread = max(raw) - min(raw)
 
+    evolve_strategy(mean, spread)
+
+    processed = []
+
     for i, c in enumerate(data):
 
-        score = raw[i]
+        s = raw[i]
 
         symbol = c["symbol"]
 
-        delta = time_delta(symbol, score)
-
-        stable = stability(symbol, score)
-
-        if score > mean:
-            MEMORY["leader_count"][symbol] = MEMORY["leader_count"].get(symbol, 0) + 1
+        if not filter_signal(s, mean):
+            continue
 
         processed.append({
             "symbol": symbol,
-            "ai_score": round(score, 2),
-            "cluster": cluster(score, c["vol"]),
-            "momentum_delta": round(delta, 3),
-            "stability": round(stable, 3),
-            "anomaly": round(anomaly(score, mean), 3)
+            "ai_score": round(s, 2),
+            "confidence": confidence(symbol)
         })
 
     processed = sorted(processed, key=lambda x: x["ai_score"], reverse=True)
 
-    top = processed[:5]
+    leader = processed[0]["symbol"]
 
-    total = sum([x["ai_score"] + 1 for x in top]) or 1
+    # UPDATE LEARNING MEMORY
+    for p in processed:
+        update_performance(p["symbol"], leader)
+
+    total = sum([x["ai_score"] + 1 for x in processed]) or 1
 
     portfolio = [
         {
             "symbol": x["symbol"],
             "weight": round((x["ai_score"] + 1) / total, 3)
         }
-        for x in top
+        for x in processed
     ]
 
-    leader = top[0]["symbol"]
-
-    regime = next_regime(mean, spread)
-
     return {
-        "model": "SOLANA_AI_V10_SELF_LEARNING",
-        "regime": regime,
-        "narrative": f"{leader} driving {regime} phase",
-        "signals": top,
+        "model": "SOLANA_AI_V11_SELF_EVOLVING",
+        "regime": regime(mean, spread),
+        "narrative": f"{leader} leading adaptive market phase",
+        "signals": processed,
         "portfolio": portfolio,
         "market_stats": {
             "mean": round(mean, 2),
             "spread": round(spread, 2)
         },
-        "memory": MEMORY
+        "strategy_weights": MEMORY["strategy_weights"],
+        "learning_memory": MEMORY["performance"]
     }
