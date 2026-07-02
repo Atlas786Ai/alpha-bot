@@ -7,146 +7,157 @@ import random
 def get_data():
 
     return [
-        {"symbol": "ARB", "price_change": random.uniform(-2, 18), "volume": random.uniform(6e8, 2e9), "vol": random.uniform(0.05, 0.22)},
-        {"symbol": "SOL", "price_change": random.uniform(-1, 15), "volume": random.uniform(9e8, 2e9), "vol": random.uniform(0.03, 0.18)},
+        {"symbol": "DOGE", "price_change": random.uniform(-2, 18), "volume": random.uniform(8e8, 2e9), "vol": random.uniform(0.05, 0.25)},
+        {"symbol": "ARB", "price_change": random.uniform(-1, 15), "volume": random.uniform(6e8, 2e9), "vol": random.uniform(0.04, 0.2)},
+        {"symbol": "SOL", "price_change": random.uniform(-1, 14), "volume": random.uniform(9e8, 2e9), "vol": random.uniform(0.03, 0.15)},
         {"symbol": "ETH", "price_change": random.uniform(-1, 9), "volume": random.uniform(1e9, 2.5e9), "vol": random.uniform(0.01, 0.08)},
-        {"symbol": "AVAX", "price_change": random.uniform(-2, 12), "volume": random.uniform(4e8, 1.5e9), "vol": random.uniform(0.04, 0.2)},
-        {"symbol": "DOGE", "price_change": random.uniform(-3, 20), "volume": random.uniform(7e8, 2e9), "vol": random.uniform(0.05, 0.3)},
+        {"symbol": "AVAX", "price_change": random.uniform(-2, 10), "volume": random.uniform(4e8, 1.5e9), "vol": random.uniform(0.03, 0.2)},
     ]
 
 
 # -----------------------------
-# FEATURE ENGINE V8
+# FEATURE ENGINE
 # -----------------------------
 def features(c):
 
-    m = c.get("price_change", 0)
-    v = math.log10(c.get("volume", 1) + 1)
-    vol = c.get("vol", 0.1)
+    m = c["price_change"]
+    v = math.log10(c["volume"] + 1)
+    vol = c["vol"]
 
-    momentum_strength = m * (1 - vol)
-    acceleration = m * vol * 10
+    momentum = m * (1 - vol)
     liquidity = v * vol
+    acceleration = m * vol * 10
 
-    return m, v, vol, momentum_strength, acceleration, liquidity
-
-
-# -----------------------------
-# SCORE V8 (MORE REALISTIC)
-# -----------------------------
-def score(c):
-
-    m, v, vol, ms, acc, liq = features(c)
-
-    return (
-        ms * 2.2 +
-        acc * 2.0 +
-        liq * 1.3 +
-        math.log1p(abs(m)) * 1.1
-    )
+    return m, v, vol, momentum, liquidity, acceleration
 
 
 # -----------------------------
-# MARKET STRESS INDEX
+# RAW SCORE
 # -----------------------------
-def stress_index(scores):
+def raw_score(c):
 
-    avg = sum(scores) / len(scores)
-    spread = max(scores) - min(scores)
+    m, v, vol, mom, liq, acc = features(c)
 
-    return round((abs(avg) * 0.6 + spread * 0.4), 3)
+    return mom * 2.0 + acc * 1.8 + liq * 1.2
 
 
 # -----------------------------
-# REGIME DETECTION
+# NORMALIZATION (0–100)
 # -----------------------------
-def regime(scores, stress):
+def normalize(scores):
 
-    if stress > 10:
-        return "EXTREME_EXPANSION"
-    elif stress > 6:
-        return "EXPLOSIVE_ROTATION"
-    elif stress > 3:
-        return "HIGH_BETA_TREND"
+    min_s = min(scores)
+    max_s = max(scores)
+    rng = max_s - min_s or 1
+
+    return [((s - min_s) / rng) * 100 for s in scores]
+
+
+# -----------------------------
+# CLUSTERING (SIMULATED)
+# -----------------------------
+def cluster(symbol, score, vol):
+
+    if score > 70 and vol < 0.1:
+        return "MOMENTUM_LEADER"
+    elif score > 40:
+        return "TREND_FOLLOW"
+    elif vol > 0.15:
+        return "HIGH_RISK"
     else:
-        return "ACCUMULATION_PHASE"
+        return "MEAN_REVERSION"
 
 
 # -----------------------------
-# TREND PERSISTENCE
+# ANOMALY SCORE (TRUE Z-LIKE)
 # -----------------------------
-def persistence(m):
+def anomaly(score, mean):
 
-    # simple proxy: strength of move vs volatility
-    return max(0, min(1, 1 / (1 + abs(m))))
+    return abs(score - mean) / (mean + 1)
 
 
 # -----------------------------
-# FORECAST MODULE (NEW V8 CORE)
+# REGIME STRUCTURE
 # -----------------------------
-def forecast(regime, stress):
+def market_structure(avg, spread):
 
-    if regime == "EXTREME_EXPANSION":
-        return "high continuation probability"
-    elif regime == "EXPLOSIVE_ROTATION":
-        return "breakout continuation with correction risk"
-    elif regime == "HIGH_BETA_TREND":
-        return "trend continuation with volatility spikes"
+    if spread > 40 and avg > 60:
+        return "EXPANSION"
+    elif spread > 30:
+        return "ROTATION"
     else:
-        return "range-bound / accumulation expected"
+        return "CHOP"
 
 
 # -----------------------------
-# MAIN ENGINE V8
+# NEXT MOVE PROBABILITY
+# -----------------------------
+def forward_bias(score):
+
+    if score > 70:
+        return {"continue": 0.72, "reverse": 0.18}
+    elif score > 40:
+        return {"continue": 0.55, "reverse": 0.35}
+    else:
+        return {"continue": 0.38, "reverse": 0.52}
+
+
+# -----------------------------
+# MAIN ENGINE V9
 # -----------------------------
 def run_engine():
 
     data = get_data()
 
+    raw = []
     signals = []
-    scores = []
 
     for c in data:
 
-        s = score(c)
-        scores.append(s)
+        s = raw_score(c)
+        raw.append(s)
 
-        m, v, vol, ms, acc, liq = features(c)
+    norm = normalize(raw)
+    mean = sum(norm) / len(norm)
+
+    for i, c in enumerate(data):
+
+        cluster_type = cluster(c["symbol"], norm[i], c["vol"])
+        anom = anomaly(norm[i], mean)
 
         signals.append({
             "symbol": c["symbol"],
-            "ai_score": round(s, 3),
-            "momentum": round(m, 3),
-            "vol": round(vol, 3),
-            "momentum_strength": round(ms, 3),
-            "persistence": round(persistence(m), 3)
+            "ai_score": round(norm[i], 2),
+            "cluster": cluster_type,
+            "anomaly_score": round(anom, 3),
+            "forward_bias": forward_bias(norm[i])
         })
 
     signals = sorted(signals, key=lambda x: x["ai_score"], reverse=True)
 
     top = signals[:5]
 
-    total = sum([abs(x["ai_score"]) + 1 for x in top]) or 1
+    total = sum([s["ai_score"] + 1 for s in top]) or 1
 
     portfolio = [
         {
             "symbol": s["symbol"],
-            "weight": round((abs(s["ai_score"]) + 1) / total, 3)
+            "weight": round((s["ai_score"] + 1) / total, 3)
         }
         for s in top
     ]
 
-    stress = stress_index(scores)
-    reg = regime(scores, stress)
+    avg = sum([s["ai_score"] for s in signals]) / len(signals)
+    spread = max([s["ai_score"] for s in signals]) - min([s["ai_score"] for s in signals])
+
+    structure = market_structure(avg, spread)
 
     leader = top[0]["symbol"]
 
     return {
-        "model": "SOLANA_AI_V8_PREDICTIVE",
-        "regime": reg,
-        "market_stress": stress,
-        "forecast": forecast(reg, stress),
-        "narrative": f"{leader} driving {reg} phase",
+        "model": "SOLANA_AI_V9_QUANT_INTELLIGENCE",
+        "market_structure": structure,
+        "narrative": f"{leader} leading {structure} market phase",
         "signals": top,
         "portfolio": portfolio
     }
