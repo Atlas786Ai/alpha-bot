@@ -25,7 +25,6 @@ def get_market():
     return data
 
 
-# 🧠 SOL 2023 pattern model
 def solana_similarity(c):
 
     change = c.get("price_change_percentage_24h", 0) or 0
@@ -34,18 +33,16 @@ def solana_similarity(c):
 
     liquidity_ratio = vol / mc
 
-    momentum_score = max(change, 0) / 10   # normalize
-    liquidity_score = min(liquidity_ratio * 1000, 10)
+    momentum = change
 
-    volatility_penalty = 1 if abs(change) < 20 else 0.7
+    liquidity = liquidity_ratio * 100
 
-    # final similarity (0 to ~10)
-    score = (momentum_score * 0.5 + liquidity_score * 0.5) * volatility_penalty
+    score = momentum + liquidity
 
     return round(score, 2)
 
 
-def market_regime(data):
+def regime(data):
 
     changes = []
 
@@ -55,27 +52,26 @@ def market_regime(data):
 
     avg = sum(changes) / len(changes) if changes else 0
 
-    if avg > 2:
+    if avg > 3:
         return "BULL"
-    elif avg < -2:
+    elif avg < -3:
         return "BEAR"
     else:
         return "NEUTRAL"
 
 
-def signal(score, sim):
+def action(score, sim):
 
-    # ترکیب momentum + similarity به SOL 2023
-    final = score + (sim * 2)
+    final = score + (sim * 3)
 
-    if final > 18:
-        return "SOLANA-STYLE BREAKOUT 🚀"
-    elif final > 12:
-        return "STRONG MOMENTUM"
-    elif final > 7:
-        return "WATCH"
+    if final > 25:
+        return "SOLANA BREAKOUT 🚀"
+    elif final > 15:
+        return "STRONG BUY"
+    elif final > 8:
+        return "BUY"
     elif final > 3:
-        return "WEAK SIGNAL"
+        return "WATCH"
     else:
         return "NOISE"
 
@@ -84,7 +80,7 @@ def run_engine():
 
     data = get_market()
 
-    regime = market_regime(data)
+    r = regime(data)
 
     signals = []
 
@@ -93,24 +89,16 @@ def run_engine():
         if not isinstance(c, dict):
             continue
 
-        change = c.get("price_change_percentage_24h", 0) or 0
-        vol = c.get("total_volume", 0) or 0
-        mc = c.get("market_cap", 1) or 1
+        score = solana_similarity(c)
+        sim = solana_similarity(c)
 
-        momentum_score = change * 0.6
-        liquidity = (vol / mc) * 1000
-
-        base_score = momentum_score + liquidity
-
-        sol_sim = solana_similarity(c)
-
-        action = signal(base_score, sol_sim)
+        act = action(score, sim)
 
         signals.append({
             "symbol": c.get("symbol", "unknown"),
-            "score": round(base_score, 2),
-            "solana_similarity": sol_sim,
-            "action": action
+            "score": score,
+            "solana_similarity": sim,
+            "action": act
         })
 
     signals.sort(key=lambda x: x["score"], reverse=True)
@@ -132,7 +120,7 @@ def run_engine():
         })
 
     return {
-        "regime": regime,
+        "regime": r,
         "signals": top10,
         "portfolio": portfolio
     }
