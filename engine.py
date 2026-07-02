@@ -2,18 +2,16 @@ import math
 import random
 import sqlite3
 
-DB_PATH = "atlas.db"
+DB_PATH = "atlas_v14.db"
+
 
 # -----------------------------
-# SAFE DB CONNECTION (FIX THREAD ERROR)
+# SAFE DB
 # -----------------------------
 def get_conn():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
 
 
-# -----------------------------
-# INIT DB
-# -----------------------------
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
@@ -35,14 +33,14 @@ init_db()
 
 
 # -----------------------------
-# MARKET DATA (SIMULATED)
+# MARKET DATA
 # -----------------------------
 def get_market():
 
     return [
-        {"symbol": "DOGE", "price": random.uniform(0.1, 0.3), "volume": random.uniform(1e9, 2e9), "vol": random.uniform(0.05, 0.3)},
-        {"symbol": "SOL", "price": random.uniform(120, 160), "volume": random.uniform(8e8, 2e9), "vol": random.uniform(0.03, 0.18)},
         {"symbol": "ETH", "price": random.uniform(2500, 3200), "volume": random.uniform(1e9, 3e9), "vol": random.uniform(0.01, 0.1)},
+        {"symbol": "SOL", "price": random.uniform(120, 160), "volume": random.uniform(8e8, 2e9), "vol": random.uniform(0.03, 0.18)},
+        {"symbol": "DOGE", "price": random.uniform(0.1, 0.3), "volume": random.uniform(1e9, 2e9), "vol": random.uniform(0.05, 0.3)},
     ]
 
 
@@ -63,33 +61,62 @@ def features(c):
 
 
 # -----------------------------
-# SCORE
+# RAW SCORE
 # -----------------------------
-def score(c):
+def raw_score(c):
 
     m, l, t = features(c)
 
-    return m * 2.0 + l * 1.2 + t * 1.5
+    return (m * 2.0) + (l * 1.2) + (t * 1.5)
 
 
 # -----------------------------
-# REGIME
+# NORMALIZATION (CRITICAL FIX)
+# -----------------------------
+def normalize(scores):
+
+    mn = min(scores)
+    mx = max(scores)
+
+    if mx - mn == 0:
+        return [0.5 for _ in scores]
+
+    return [(s - mn) / (mx - mn) for s in scores]
+
+
+# -----------------------------
+# SOLANA 2023 SIMILARITY ENGINE (REALISTIC)
+# -----------------------------
+def sol_similarity(momentum, vol, trend):
+
+    return (
+        0.4 * momentum +
+        0.35 * (1 - vol) +
+        0.25 * trend
+    )
+
+
+# -----------------------------
+# REGIME PROBABILITY MODEL
 # -----------------------------
 def regime(scores):
 
     spread = max(scores) - min(scores)
     mean = sum(scores) / len(scores)
 
-    if spread > 80:
+    p_explosive = min(1.0, spread / 100)
+    p_chop = max(0.1, 1 - mean / 200)
+
+    if p_explosive > 0.6:
         return "EXPLOSIVE_ROTATION"
-    elif mean > 100:
-        return "HIGH_BETA_TREND"
+    elif p_chop > 0.5:
+        return "CHOP_MARKET"
     else:
-        return "CHOP"
+        return "HIGH_BETA_TREND"
 
 
 # -----------------------------
-# SAVE TO DB (FIXED THREAD SAFE)
+# SAVE
 # -----------------------------
 def save(symbol, score, vol, reg):
 
@@ -105,52 +132,66 @@ def save(symbol, score, vol, reg):
 
 
 # -----------------------------
-# MAIN ENGINE
+# MAIN ENGINE V14
 # -----------------------------
 def run_engine():
 
     data = get_market()
 
-    scores = []
-    raw = []
+    raw_scores = []
+    computed = []
 
     for c in data:
 
-        s = score(c)
-        scores.append(s)
-        raw.append((c, s))
+        r = raw_score(c)
+        raw_scores.append(r)
 
-    reg = regime(scores)
+        m, l, t = features(c)
 
-    processed = []
+        sim = sol_similarity(m, c["vol"], t)
 
-    for c, s in raw:
-
-        processed.append({
+        computed.append({
             "symbol": c["symbol"],
-            "ai_score": round(s, 2)
+            "raw_score": r,
+            "sol_similarity": round(sim, 3),
+            "vol": c["vol"]
         })
 
-        save(c["symbol"], s, c["vol"], reg)
+    # normalize scores
+    norm = normalize(raw_scores)
 
-    processed = sorted(processed, key=lambda x: x["ai_score"], reverse=True)
+    for i in range(len(computed)):
+        computed[i]["ai_score"] = round(norm[i] * 100, 2)
 
-    leader = processed[0]["symbol"]
+    computed = sorted(computed, key=lambda x: x["ai_score"], reverse=True)
 
-    total = sum([p["ai_score"] + 1 for p in processed])
+    reg = regime([c["ai_score"] for c in computed])
 
-    portfolio = [
-        {
-            "symbol": p["symbol"],
-            "weight": round((p["ai_score"] + 1) / total, 3)
-        }
-        for p in processed
-    ]
+    leader = computed[0]["symbol"]
+
+    # portfolio softmax
+    weights_raw = [c["ai_score"] for c in computed]
+    total = sum(weights_raw) + 1e-9
+
+    portfolio = []
+
+    for c in computed:
+
+        w = (c["ai_score"] + 1) / total
+
+        # risk cap
+        w = min(w, 0.6)
+
+        portfolio.append({
+            "symbol": c["symbol"],
+            "weight": round(w, 3)
+        })
 
     return {
-        "model": "SOLANA_AI_FIXED_THREAD_SAFE_V13",
+        "model": "SOLANA_AI_V14_NORMALIZED_QUANT",
         "regime": reg,
-        "narrative": f"{leader} leading market phase",
-        "signals": processed,
-        "portfolio": portfolio
+        "narrative": f"{leader} leading stabilized quant cycle",
+        "signals": computed,
+        "portfolio": portfolio,
+        "engine": "normalized + probabilistic + solana_similarity_v2"
     }
