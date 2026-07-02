@@ -2,16 +2,25 @@ import math
 import random
 
 # -----------------------------
+# MEMORY (in-memory simulation)
+# -----------------------------
+MEMORY = {
+    "last_scores": {},
+    "leader_count": {}
+}
+
+
+# -----------------------------
 # MARKET DATA
 # -----------------------------
 def get_data():
 
     return [
-        {"symbol": "DOGE", "price_change": random.uniform(-2, 18), "volume": random.uniform(8e8, 2e9), "vol": random.uniform(0.05, 0.25)},
-        {"symbol": "ARB", "price_change": random.uniform(-1, 15), "volume": random.uniform(6e8, 2e9), "vol": random.uniform(0.04, 0.2)},
-        {"symbol": "SOL", "price_change": random.uniform(-1, 14), "volume": random.uniform(9e8, 2e9), "vol": random.uniform(0.03, 0.15)},
-        {"symbol": "ETH", "price_change": random.uniform(-1, 9), "volume": random.uniform(1e9, 2.5e9), "vol": random.uniform(0.01, 0.08)},
-        {"symbol": "AVAX", "price_change": random.uniform(-2, 10), "volume": random.uniform(4e8, 1.5e9), "vol": random.uniform(0.03, 0.2)},
+        {"symbol": "ARB", "price_change": random.uniform(-2, 20), "volume": random.uniform(6e8, 2e9), "vol": random.uniform(0.04, 0.25)},
+        {"symbol": "SOL", "price_change": random.uniform(-1, 16), "volume": random.uniform(9e8, 2e9), "vol": random.uniform(0.03, 0.18)},
+        {"symbol": "ETH", "price_change": random.uniform(-1, 10), "volume": random.uniform(1e9, 2.5e9), "vol": random.uniform(0.01, 0.09)},
+        {"symbol": "AVAX", "price_change": random.uniform(-2, 12), "volume": random.uniform(4e8, 1.5e9), "vol": random.uniform(0.03, 0.2)},
+        {"symbol": "DOGE", "price_change": random.uniform(-4, 22), "volume": random.uniform(7e8, 2e9), "vol": random.uniform(0.05, 0.3)},
     ]
 
 
@@ -32,44 +41,55 @@ def features(c):
 
 
 # -----------------------------
-# RAW SCORE
+# BASE SCORE
 # -----------------------------
-def raw_score(c):
+def base_score(c):
 
     m, v, vol, mom, liq, acc = features(c)
 
-    return mom * 2.0 + acc * 1.8 + liq * 1.2
+    return mom * 2.1 + acc * 1.9 + liq * 1.2
 
 
 # -----------------------------
-# NORMALIZATION (0–100)
+# TIME DELTA (learning signal)
 # -----------------------------
-def normalize(scores):
+def time_delta(symbol, score):
 
-    min_s = min(scores)
-    max_s = max(scores)
-    rng = max_s - min_s or 1
+    last = MEMORY["last_scores"].get(symbol, score)
 
-    return [((s - min_s) / rng) * 100 for s in scores]
+    delta = score - last
 
+    MEMORY["last_scores"][symbol] = score
 
-# -----------------------------
-# CLUSTERING (SIMULATED)
-# -----------------------------
-def cluster(symbol, score, vol):
-
-    if score > 70 and vol < 0.1:
-        return "MOMENTUM_LEADER"
-    elif score > 40:
-        return "TREND_FOLLOW"
-    elif vol > 0.15:
-        return "HIGH_RISK"
-    else:
-        return "MEAN_REVERSION"
+    return delta
 
 
 # -----------------------------
-# ANOMALY SCORE (TRUE Z-LIKE)
+# STABILITY SCORE
+# -----------------------------
+def stability(symbol, score):
+
+    last = MEMORY["last_scores"].get(symbol, score)
+
+    diff = abs(score - last)
+
+    return max(0, 1 - diff / 50)
+
+
+# -----------------------------
+# LEARNING ADJUSTMENT
+# -----------------------------
+def learning_adjust(symbol, score):
+
+    count = MEMORY["leader_count"].get(symbol, 0)
+
+    penalty = count * 0.03
+
+    return score * (1 - penalty)
+
+
+# -----------------------------
+# ANOMALY SCORE
 # -----------------------------
 def anomaly(score, mean):
 
@@ -77,87 +97,103 @@ def anomaly(score, mean):
 
 
 # -----------------------------
-# REGIME STRUCTURE
+# CLUSTERING (V10 simplified)
 # -----------------------------
-def market_structure(avg, spread):
+def cluster(score, vol):
 
-    if spread > 40 and avg > 60:
-        return "EXPANSION"
-    elif spread > 30:
-        return "ROTATION"
-    else:
-        return "CHOP"
-
-
-# -----------------------------
-# NEXT MOVE PROBABILITY
-# -----------------------------
-def forward_bias(score):
-
-    if score > 70:
-        return {"continue": 0.72, "reverse": 0.18}
+    if score > 70 and vol < 0.1:
+        return "MOMENTUM_LEADER"
     elif score > 40:
-        return {"continue": 0.55, "reverse": 0.35}
+        return "ROTATION_CORE"
+    elif vol > 0.18:
+        return "HIGH_RISK"
     else:
-        return {"continue": 0.38, "reverse": 0.52}
+        return "MEAN_REVERSION"
 
 
 # -----------------------------
-# MAIN ENGINE V9
+# NEXT REGIME PREDICTION
+# -----------------------------
+def next_regime(avg, spread):
+
+    if spread > 45:
+        return "EXPLOSIVE_ROTATION"
+    elif avg > 60:
+        return "HIGH_BETA_TREND"
+    else:
+        return "CHOP_OR_ACCUMULATION"
+
+
+# -----------------------------
+# MAIN ENGINE V10
 # -----------------------------
 def run_engine():
 
     data = get_data()
 
     raw = []
-    signals = []
+    processed = []
 
     for c in data:
 
-        s = raw_score(c)
-        raw.append(s)
+        score = base_score(c)
 
-    norm = normalize(raw)
-    mean = sum(norm) / len(norm)
+        score = learning_adjust(c["symbol"], score)
+
+        raw.append(score)
+
+    mean = sum(raw) / len(raw)
+    spread = max(raw) - min(raw)
 
     for i, c in enumerate(data):
 
-        cluster_type = cluster(c["symbol"], norm[i], c["vol"])
-        anom = anomaly(norm[i], mean)
+        score = raw[i]
 
-        signals.append({
-            "symbol": c["symbol"],
-            "ai_score": round(norm[i], 2),
-            "cluster": cluster_type,
-            "anomaly_score": round(anom, 3),
-            "forward_bias": forward_bias(norm[i])
+        symbol = c["symbol"]
+
+        delta = time_delta(symbol, score)
+
+        stable = stability(symbol, score)
+
+        if score > mean:
+            MEMORY["leader_count"][symbol] = MEMORY["leader_count"].get(symbol, 0) + 1
+
+        processed.append({
+            "symbol": symbol,
+            "ai_score": round(score, 2),
+            "cluster": cluster(score, c["vol"]),
+            "momentum_delta": round(delta, 3),
+            "stability": round(stable, 3),
+            "anomaly": round(anomaly(score, mean), 3)
         })
 
-    signals = sorted(signals, key=lambda x: x["ai_score"], reverse=True)
+    processed = sorted(processed, key=lambda x: x["ai_score"], reverse=True)
 
-    top = signals[:5]
+    top = processed[:5]
 
-    total = sum([s["ai_score"] + 1 for s in top]) or 1
+    total = sum([x["ai_score"] + 1 for x in top]) or 1
 
     portfolio = [
         {
-            "symbol": s["symbol"],
-            "weight": round((s["ai_score"] + 1) / total, 3)
+            "symbol": x["symbol"],
+            "weight": round((x["ai_score"] + 1) / total, 3)
         }
-        for s in top
+        for x in top
     ]
-
-    avg = sum([s["ai_score"] for s in signals]) / len(signals)
-    spread = max([s["ai_score"] for s in signals]) - min([s["ai_score"] for s in signals])
-
-    structure = market_structure(avg, spread)
 
     leader = top[0]["symbol"]
 
+    regime = next_regime(mean, spread)
+
     return {
-        "model": "SOLANA_AI_V9_QUANT_INTELLIGENCE",
-        "market_structure": structure,
-        "narrative": f"{leader} leading {structure} market phase",
+        "model": "SOLANA_AI_V10_SELF_LEARNING",
+        "regime": regime,
+        "narrative": f"{leader} driving {regime} phase",
         "signals": top,
-        "portfolio": portfolio
+        "portfolio": portfolio,
+        "market_stats": {
+            "mean": round(mean, 2),
+            "spread": round(spread, 2)
+        },
+        "memory": MEMORY
     }
