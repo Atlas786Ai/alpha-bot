@@ -7,92 +7,53 @@ def get_market():
     params = {
         "vs_currency": "usd",
         "order": "market_cap_desc",
-        "per_page": 30,
+        "per_page": 10,
         "page": 1,
         "sparkline": False
     }
 
     res = requests.get(url, params=params, timeout=10)
 
+    print("STATUS:", res.status_code)
+    print("TEXT:", res.text[:200])
+
     if res.status_code != 200:
         return []
 
-    data = res.json()
-
-    if not isinstance(data, list):
+    try:
+        data = res.json()
+    except Exception as e:
+        print("JSON ERROR:", e)
         return []
 
+    print("DATA TYPE:", type(data))
+
     return data
-
-
-def safe(c, key):
-
-    v = c.get(key, 0)
-    if v is None:
-        return 0
-    return v
-
-
-def compute_raw(c):
-
-    change = safe(c, "price_change_percentage_24h")
-    vol = safe(c, "total_volume")
-    mc = safe(c, "market_cap")
-
-    if mc == 0:
-        mc = 1
-
-    liquidity = vol / mc
-
-    return {
-        "symbol": c.get("symbol", "unknown"),
-        "change": change,
-        "liquidity": liquidity
-    }
 
 
 def run_engine():
 
     data = get_market()
 
-    processed = [compute_raw(c) for c in data]
-
-    # ❗ ranking-based normalization
-    changes = sorted([p["change"] for p in processed], reverse=True)
-    liqs = sorted([p["liquidity"] for p in processed], reverse=True)
+    print("LEN:", len(data) if isinstance(data, list) else "NO LIST")
 
     signals = []
 
-    for p in processed:
+    for i, c in enumerate(data):
 
-        # rank score instead of raw math
-        change_rank = changes.index(p["change"]) if p["change"] in changes else 0
-        liq_rank = liqs.index(p["liquidity"]) if p["liquidity"] in liqs else 0
+        print("COIN:", i, c)
 
-        score = (len(processed) - change_rank) * 0.6 + (len(processed) - liq_rank) * 0.4
+        if not isinstance(c, dict):
+            continue
+
+        change = c.get("price_change_percentage_24h", 0) or 0
 
         signals.append({
-            "symbol": p["symbol"],
-            "score": round(score, 2)
-        })
-
-    signals = sorted(signals, key=lambda x: x["score"], reverse=True)
-
-    top10 = signals[:10]
-
-    total = sum([s["score"] for s in top10]) or 1
-
-    portfolio = []
-
-    for s in top10:
-
-        portfolio.append({
-            "symbol": s["symbol"],
-            "weight": round(s["score"] / total, 3)
+            "symbol": c.get("symbol"),
+            "score": change
         })
 
     return {
-        "regime": "NEUTRAL",
-        "signals": top10,
-        "portfolio": portfolio
+        "debug_len": len(data) if isinstance(data, list) else 0,
+        "signals": signals
     }
