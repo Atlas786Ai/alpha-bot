@@ -2,59 +2,82 @@ import math
 import random
 
 # -----------------------------
-# SIMULATED MARKET (stable base)
+# MARKET SIMULATION (stable)
 # -----------------------------
 def get_data():
 
     return [
-        {"symbol": "SOL", "price_change": random.uniform(2, 12), "volume": random.uniform(8e8, 2e9), "volatility": random.uniform(0.03, 0.12)},
-        {"symbol": "AVAX", "price_change": random.uniform(1, 10), "volume": random.uniform(4e8, 1.2e9), "volatility": random.uniform(0.04, 0.15)},
-        {"symbol": "ARB", "price_change": random.uniform(0, 9), "volume": random.uniform(3e8, 1e9), "volatility": random.uniform(0.05, 0.18)},
-        {"symbol": "BTC", "price_change": random.uniform(-1, 5), "volume": random.uniform(1e9, 3e9), "volatility": random.uniform(0.01, 0.04)},
+        {"symbol": "SOL", "price_change": random.uniform(1, 12), "volume": random.uniform(8e8, 2e9), "volatility": random.uniform(0.03, 0.12)},
+        {"symbol": "ARB", "price_change": random.uniform(0, 10), "volume": random.uniform(3e8, 1.2e9), "volatility": random.uniform(0.05, 0.18)},
+        {"symbol": "AVAX", "price_change": random.uniform(-1, 9), "volume": random.uniform(4e8, 1.5e9), "volatility": random.uniform(0.04, 0.15)},
+        {"symbol": "DOGE", "price_change": random.uniform(-2, 15), "volume": random.uniform(5e8, 1.8e9), "volatility": random.uniform(0.06, 0.22)},
         {"symbol": "ETH", "price_change": random.uniform(-1, 6), "volume": random.uniform(8e8, 2e9), "volatility": random.uniform(0.02, 0.06)},
-        {"symbol": "DOGE", "price_change": random.uniform(-3, 15), "volume": random.uniform(5e8, 1.5e9), "volatility": random.uniform(0.06, 0.2)},
+        {"symbol": "BTC", "price_change": random.uniform(-1, 5), "volume": random.uniform(1e9, 3e9), "volatility": random.uniform(0.01, 0.04)},
     ]
 
 
 # -----------------------------
-# SOLANA 2023 BEHAVIOR MODEL
+# FEATURE ENGINE (professional)
 # -----------------------------
-def solana_similarity_score(c):
+def features(c):
 
-    # core features
     momentum = c["price_change"]
     volume = math.log10(c["volume"] + 1)
-    volatility = c["volatility"]
+    vol = c["volatility"]
 
-    # -----------------------------
-    # "Solana-like behavior traits"
-    # -----------------------------
+    # breakout intensity
+    breakout = momentum * vol * 12
 
-    # 1. breakout strength (momentum spike)
-    breakout = momentum * volatility * 10
+    # liquidity pressure
+    liquidity = volume * vol
 
-    # 2. liquidity expansion (volume growth)
-    liquidity_expansion = volume * volatility
+    # acceleration (non-linear hype)
+    acceleration = math.sqrt(abs(momentum)) * volume
 
-    # 3. hype factor (non-linear acceleration)
-    hype = math.sqrt(abs(momentum)) * volume
+    # risk distortion (important for regime shift detection)
+    risk = abs(vol - 0.08)
 
-    # 4. stability penalty (SOL-like early stage is unstable)
-    stability_penalty = -abs(volatility - 0.08) * 5
+    return breakout, liquidity, acceleration, risk, momentum, vol
 
-    # final similarity score
+
+# -----------------------------
+# SOLANA-LIKE NARRATIVE MODEL
+# -----------------------------
+def solana_similarity(c):
+
+    breakout, liquidity, acceleration, risk, momentum, vol = features(c)
+
     score = (
-        breakout * 2.5 +
-        liquidity_expansion * 1.2 +
-        math.log1p(hype) +
-        stability_penalty
+        breakout * 3.0 +
+        liquidity * 1.4 +
+        math.log1p(acceleration) * 2.0 -
+        risk * 6.0
     )
 
     return score
 
 
 # -----------------------------
-# ENGINE
+# REGIME DETECTOR (NEW)
+# -----------------------------
+def detect_regime(signals):
+
+    avg = sum([s["sol_score"] for s in signals]) / len(signals)
+
+    volatility_cluster = sum([s["vol"] for s in signals]) / len(signals)
+
+    if avg > 80 and volatility_cluster > 0.1:
+        return "MEME_SUPERCYCLE"
+    elif avg > 50:
+        return "HIGH_BETA_BREAKOUT"
+    elif avg > 25:
+        return "EARLY_ROTATION"
+    else:
+        return "CHOP_MARKET"
+
+
+# -----------------------------
+# MAIN ENGINE
 # -----------------------------
 def run_engine():
 
@@ -64,43 +87,59 @@ def run_engine():
 
     for c in data:
 
-        score = solana_similarity_score(c)
+        sol_score = solana_similarity(c)
+
+        breakout, liquidity, acceleration, risk, momentum, vol = features(c)
 
         signals.append({
             "symbol": c["symbol"],
-            "sol_similarity": round(score, 3),
-            "momentum": round(c["price_change"], 3),
-            "volatility": round(c["volatility"], 3)
+            "sol_score": round(sol_score, 3),
+            "momentum": round(momentum, 3),
+            "vol": round(vol, 3),
+            "breakout": round(breakout, 3),
+            "liquidity": round(liquidity, 3)
         })
 
-    # rank by similarity
-    signals = sorted(signals, key=lambda x: x["sol_similarity"], reverse=True)
+    # ranking
+    signals = sorted(signals, key=lambda x: x["sol_score"], reverse=True)
 
     top = signals[:5]
 
-    total = sum([abs(s["sol_similarity"]) + 1 for s in top]) or 1
+    # portfolio (risk-adjusted allocation)
+    total = sum([abs(s["sol_score"]) + 1 for s in top]) or 1
 
-    portfolio = [
-        {
+    portfolio = []
+
+    for s in top:
+
+        risk_adj = 1 / (1 + s["vol"])
+
+        weight = ((abs(s["sol_score"]) + 1) * risk_adj) / total
+
+        portfolio.append({
             "symbol": s["symbol"],
-            "weight": round((abs(s["sol_similarity"]) + 1) / total, 3)
-        }
-        for s in top
-    ]
+            "weight": round(weight, 3)
+        })
 
-    # regime detection (behavioral)
-    avg_sim = sum([s["sol_similarity"] for s in top]) / len(top)
+    # regime
+    regime = detect_regime(top)
 
-    if avg_sim > 50:
-        regime = "SOLANA_BREAKOUT_LIKE"
-    elif avg_sim > 20:
-        regime = "HIGH_GROWTH_PHASE"
+    # narrative layer (NEW — very important upgrade)
+    leader = top[0]["symbol"]
+
+    if regime == "MEME_SUPERCYCLE":
+        narrative = f"{leader} leading speculative expansion phase"
+    elif regime == "HIGH_BETA_BREAKOUT":
+        narrative = f"{leader} driving high-beta momentum rotation"
+    elif regime == "EARLY_ROTATION":
+        narrative = f"{leader} showing early accumulation behavior"
     else:
-        regime = "NORMAL_MARKET"
+        narrative = "market in consolidation phase"
 
     return {
+        "model": "SOLANA_2023_SIMILARITY_V2",
         "regime": regime,
-        "model": "SOLANA_2023_SIMILARITY_V1",
+        "narrative": narrative,
         "signals": top,
         "portfolio": portfolio
     }
