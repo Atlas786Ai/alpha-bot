@@ -1,24 +1,61 @@
-import random
 import math
+import random
 
-# ---------------------------
-# FAKE BUT REALISTIC MARKET DATA
-# ---------------------------
+# -----------------------------
+# SIMULATED MARKET (stable base)
+# -----------------------------
 def get_data():
 
-    # simulate real crypto market (stable + همیشه جواب می‌دهد)
-    coins = [
-        {"symbol": "SOL", "price_change_percentage_24h": random.uniform(-5, 10), "volume": random.uniform(1e8, 1e9), "market_cap": 8e10},
-        {"symbol": "BTC", "price_change_percentage_24h": random.uniform(-3, 5), "volume": random.uniform(5e8, 2e9), "market_cap": 1e12},
-        {"symbol": "ETH", "price_change_percentage_24h": random.uniform(-4, 6), "volume": random.uniform(4e8, 1.5e9), "market_cap": 5e11},
-        {"symbol": "BNB", "price_change_percentage_24h": random.uniform(-3, 7), "volume": random.uniform(2e8, 8e8), "market_cap": 8e10},
-        {"symbol": "XRP", "price_change_percentage_24h": random.uniform(-6, 8), "volume": random.uniform(1e8, 7e8), "market_cap": 3e10},
-        {"symbol": "DOGE", "price_change_percentage_24h": random.uniform(-8, 12), "volume": random.uniform(2e8, 9e8), "market_cap": 1e10},
+    return [
+        {"symbol": "SOL", "price_change": random.uniform(2, 12), "volume": random.uniform(8e8, 2e9), "volatility": random.uniform(0.03, 0.12)},
+        {"symbol": "AVAX", "price_change": random.uniform(1, 10), "volume": random.uniform(4e8, 1.2e9), "volatility": random.uniform(0.04, 0.15)},
+        {"symbol": "ARB", "price_change": random.uniform(0, 9), "volume": random.uniform(3e8, 1e9), "volatility": random.uniform(0.05, 0.18)},
+        {"symbol": "BTC", "price_change": random.uniform(-1, 5), "volume": random.uniform(1e9, 3e9), "volatility": random.uniform(0.01, 0.04)},
+        {"symbol": "ETH", "price_change": random.uniform(-1, 6), "volume": random.uniform(8e8, 2e9), "volatility": random.uniform(0.02, 0.06)},
+        {"symbol": "DOGE", "price_change": random.uniform(-3, 15), "volume": random.uniform(5e8, 1.5e9), "volatility": random.uniform(0.06, 0.2)},
     ]
 
-    return coins
+
+# -----------------------------
+# SOLANA 2023 BEHAVIOR MODEL
+# -----------------------------
+def solana_similarity_score(c):
+
+    # core features
+    momentum = c["price_change"]
+    volume = math.log10(c["volume"] + 1)
+    volatility = c["volatility"]
+
+    # -----------------------------
+    # "Solana-like behavior traits"
+    # -----------------------------
+
+    # 1. breakout strength (momentum spike)
+    breakout = momentum * volatility * 10
+
+    # 2. liquidity expansion (volume growth)
+    liquidity_expansion = volume * volatility
+
+    # 3. hype factor (non-linear acceleration)
+    hype = math.sqrt(abs(momentum)) * volume
+
+    # 4. stability penalty (SOL-like early stage is unstable)
+    stability_penalty = -abs(volatility - 0.08) * 5
+
+    # final similarity score
+    score = (
+        breakout * 2.5 +
+        liquidity_expansion * 1.2 +
+        math.log1p(hype) +
+        stability_penalty
+    )
+
+    return score
 
 
+# -----------------------------
+# ENGINE
+# -----------------------------
 def run_engine():
 
     data = get_data()
@@ -27,51 +64,43 @@ def run_engine():
 
     for c in data:
 
-        change = c["price_change_percentage_24h"]
-        volume = c["volume"]
-        cap = c["market_cap"]
-
-        # ---------------- SMART SCORING ----------------
-        momentum = change
-        liquidity = math.log10(volume + 1)
-        size = math.log10(cap + 1)
-
-        score = momentum * 2.2 + liquidity * 1.1 + size * 0.7
+        score = solana_similarity_score(c)
 
         signals.append({
             "symbol": c["symbol"],
-            "score": round(score, 3),
-            "momentum": round(momentum, 3)
+            "sol_similarity": round(score, 3),
+            "momentum": round(c["price_change"], 3),
+            "volatility": round(c["volatility"], 3)
         })
 
-    signals = sorted(signals, key=lambda x: x["score"], reverse=True)
+    # rank by similarity
+    signals = sorted(signals, key=lambda x: x["sol_similarity"], reverse=True)
 
-    top10 = signals[:10]
+    top = signals[:5]
 
-    total = sum([abs(s["score"]) + 1 for s in top10]) or 1
+    total = sum([abs(s["sol_similarity"]) + 1 for s in top]) or 1
 
-    portfolio = []
-
-    for s in top10:
-
-        portfolio.append({
+    portfolio = [
+        {
             "symbol": s["symbol"],
-            "weight": round((abs(s["score"]) + 1) / total, 3)
-        })
+            "weight": round((abs(s["sol_similarity"]) + 1) / total, 3)
+        }
+        for s in top
+    ]
 
-    # ---------------- REGIME ----------------
-    avg = sum([s["momentum"] for s in top10]) / len(top10)
+    # regime detection (behavioral)
+    avg_sim = sum([s["sol_similarity"] for s in top]) / len(top)
 
-    if avg > 2:
-        regime = "RISK_ON"
-    elif avg < -2:
-        regime = "RISK_OFF"
+    if avg_sim > 50:
+        regime = "SOLANA_BREAKOUT_LIKE"
+    elif avg_sim > 20:
+        regime = "HIGH_GROWTH_PHASE"
     else:
-        regime = "NEUTRAL"
+        regime = "NORMAL_MARKET"
 
     return {
         "regime": regime,
-        "source": "SIMULATED_MARKET",
-        "signals": top10,
+        "model": "SOLANA_2023_SIMILARITY_V1",
+        "signals": top,
         "portfolio": portfolio
     }
