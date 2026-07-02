@@ -7,15 +7,14 @@ def get_market():
     params = {
         "vs_currency": "usd",
         "order": "market_cap_desc",
-        "per_page": 10,
+        "per_page": 20,
         "page": 1,
         "sparkline": False,
-        "price_change_percentage": "24h,7d"
+        "price_change_percentage": "24h"
     }
 
-    data = requests.get(url, params=params).json()
+    data = requests.get(url, params=params, timeout=10).json()
 
-    # safety check (خیلی مهم)
     if not isinstance(data, list):
         return []
 
@@ -33,10 +32,13 @@ def run_engine():
         if not isinstance(c, dict):
             continue
 
-        change_24h = c.get("price_change_percentage_24h", 0) or 0
-        change_7d = c.get("price_change_percentage_7d_in_currency", 0) or 0
+        change_24h = c.get("price_change_percentage_24h", 0)
 
-        score = (change_24h * 0.4) + (change_7d * 0.6)
+        # مهم: جلوگیری از None
+        if change_24h is None:
+            change_24h = 0
+
+        score = change_24h
 
         results.append({
             "symbol": c.get("symbol", "unknown"),
@@ -45,4 +47,6 @@ def run_engine():
 
     results.sort(key=lambda x: x["score"], reverse=True)
 
-    return {"top10": results}
+    return {
+        "top10": results[:10]
+    }
