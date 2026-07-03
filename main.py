@@ -2,111 +2,112 @@ from fastapi import FastAPI
 import requests
 import time
 import math
-import random
 
 app = FastAPI()
 
 # =========================
-# STATE (SIMPLE + SAFE)
+# CANONICAL STATE
 # =========================
 STATE = {
     "equity": 100.0,
-    "last_error": None,
     "cache": None,
-    "cache_time": 0
+    "cache_time": 0,
+    "last_error": None
 }
 
 CACHE_TTL = 60
 
 
 # =========================
-# HOME
+# ROOT
 # =========================
 @app.get("/")
 def home():
     return {
-        "status": "CLEAN ENGINE ACTIVE",
-        "model": "CLEAN_QUANT_V1"
+        "model": "ATLAS_CANONICAL_V1",
+        "status": "UNIFIED_SYSTEM_ACTIVE"
     }
 
 
 # =========================
-# UPDATE (ONLY ONE ENTRY POINT)
+# UPDATE ENDPOINT
 # =========================
 @app.get("/update")
 def update():
     try:
-        return run_engine()
+        return run_system()
     except Exception as e:
         return {
-            "status": "ERROR_HANDLED",
+            "model": "ATLAS_CANONICAL_V1",
+            "status": "SAFE_ERROR_HANDLED",
             "error": str(e),
             "equity": STATE["equity"]
         }
 
 
 # =========================
-# SAFE REQUEST FUNCTION
+# SAFE DATA FETCH
 # =========================
-def safe_get(url, params=None):
+def fetch_market():
 
-    try:
-        r = requests.get(url, params=params, timeout=6)
-
-        if r.status_code != 200:
-            return None
-
-        return r.json()
-
-    except Exception as e:
-        STATE["last_error"] = str(e)
-        return None
-
-
-# =========================
-# MARKET DATA (CLEAN LAYER)
-# =========================
-def get_market():
-
-    # cache first
+    # CACHE FIRST
     if STATE["cache"] and time.time() - STATE["cache_time"] < CACHE_TTL:
         return STATE["cache"]
 
-    data = safe_get(
-        "https://api.coingecko.com/api/v3/coins/markets",
-        {
-            "vs_currency": "usd",
-            "order": "market_cap_desc",
-            "per_page": 50,
-            "page": 1,
-            "sparkline": "false"
-        }
-    )
+    try:
+        r = requests.get(
+            "https://api.coingecko.com/api/v3/coins/markets",
+            params={
+                "vs_currency": "usd",
+                "order": "market_cap_desc",
+                "per_page": 50,
+                "page": 1,
+                "sparkline": "false"
+            },
+            timeout=6
+        )
 
-    # fallback guaranteed data
-    if not data:
-        data = [
-            {"symbol": "BTC", "price_change_percentage_24h": 1.2, "total_volume": 1000000, "market_cap_rank": 1},
-            {"symbol": "ETH", "price_change_percentage_24h": 0.8, "total_volume": 900000, "market_cap_rank": 2},
-            {"symbol": "SOL", "price_change_percentage_24h": 2.1, "total_volume": 700000, "market_cap_rank": 5},
-            {"symbol": "ARB", "price_change_percentage_24h": 3.0, "total_volume": 300000, "market_cap_rank": 20},
-            {"symbol": "AVAX", "price_change_percentage_24h": 1.5, "total_volume": 500000, "market_cap_rank": 10},
-        ]
+        data = r.json()
 
-    STATE["cache"] = data
-    STATE["cache_time"] = time.time()
+        if isinstance(data, list):
+            STATE["cache"] = data
+            STATE["cache_time"] = time.time()
+            return data
 
-    return data
+    except Exception as e:
+        STATE["last_error"] = str(e)
+
+    # HARD FALLBACK (guaranteed schema)
+    return [
+        {"symbol": "BTC", "price_change_percentage_24h": 1.0, "total_volume": 1000000, "market_cap_rank": 1},
+        {"symbol": "ETH", "price_change_percentage_24h": 0.8, "total_volume": 900000, "market_cap_rank": 2},
+        {"symbol": "SOL", "price_change_percentage_24h": 2.0, "total_volume": 700000, "market_cap_rank": 5},
+        {"symbol": "ARB", "price_change_percentage_24h": 3.0, "total_volume": 300000, "market_cap_rank": 20},
+        {"symbol": "AVAX", "price_change_percentage_24h": 1.5, "total_volume": 500000, "market_cap_rank": 10},
+    ]
 
 
 # =========================
-# SIMPLE SCORE ENGINE
+# NORMALIZATION LAYER
+# =========================
+def normalize(x):
+
+    return {
+        "symbol": (x.get("symbol") or "UNK").upper(),
+        "change": float(x.get("price_change_percentage_24h") or 0),
+        "volume": float(x.get("total_volume") or 1),
+        "rank": int(x.get("market_cap_rank") or 100)
+    }
+
+
+# =========================
+# SIGNAL ENGINE (CORE INTELLIGENCE)
 # =========================
 def score(asset):
 
-    change = asset.get("price_change_percentage_24h", 0) or 0
-    volume = asset.get("total_volume", 1) or 1
-    rank = asset.get("market_cap_rank", 100) or 100
+    change = asset["change"]
+    volume = asset["volume"]
+    rank = asset["rank"]
 
     momentum = change / 10
     volume_score = math.log1p(volume)
@@ -116,56 +117,64 @@ def score(asset):
 
     return (
         momentum * 0.30 +
-        volume_score * 0.20 +
-        rank_score * 0.30 +
+        volume_score * 0.25 +
+        rank_score * 0.25 +
         stability * 0.20
     )
 
 
 # =========================
-# MAIN ENGINE (ONLY ONE)
+# PORTFOLIO BUILDER
 # =========================
-def run_engine():
+def build_portfolio(scored):
 
-    market = get_market()
+    top5 = scored[:5]
 
-    scored = []
+    total = sum(abs(x["score"]) for x in top5) or 1
 
-    for m in market:
-
-        symbol = (m.get("symbol") or "UNK").upper()
-
-        s = score(m)
-
-        scored.append({
-            "symbol": symbol,
-            "score": round(s, 6),
-            "momentum": m.get("price_change_percentage_24h", 0)
-        })
-
-    scored.sort(key=lambda x: x["score"], reverse=True)
-
-    top10 = scored[:10]
-
-    total = sum(abs(x["score"]) for x in top10) or 1
-
-    portfolio = [
+    return [
         {
             "symbol": x["symbol"],
             "weight": round(abs(x["score"]) / total, 4)
         }
-        for x in top10[:5]
+        for x in top5
     ]
 
-    # equity simulation (stable)
-    STATE["equity"] += sum(x["score"] for x in top10) / 20000
+
+# =========================
+# MAIN CANONICAL ENGINE
+# =========================
+def run_system():
+
+    raw = fetch_market()
+
+    normalized = [normalize(x) for x in raw]
+
+    scored = []
+
+    for x in normalized:
+
+        s = score(x)
+
+        scored.append({
+            "symbol": x["symbol"],
+            "score": round(s, 6),
+            "momentum": x["change"],
+            "rank": x["rank"]
+        })
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+
+    portfolio = build_portfolio(scored)
+
+    STATE["equity"] += sum(x["score"] for x in scored[:10]) / 20000
 
     return {
-        "model": "CLEAN_QUANT_V1",
+        "model": "ATLAS_CANONICAL_V1",
         "status": "OK",
-        "top10": top10,
+        "top10": scored[:10],
         "portfolio": portfolio,
         "equity": round(STATE["equity"], 4),
-        "cache_age": round(time.time() - STATE["cache_time"], 2),
-        "error": STATE["last_error"]
+        "last_error": STATE["last_error"],
+        "cache_age": round(time.time() - STATE["cache_time"], 2)
     }
