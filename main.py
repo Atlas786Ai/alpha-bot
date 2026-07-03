@@ -2,18 +2,20 @@ from fastapi import FastAPI
 import requests
 import time
 import math
-import statistics
 
 app = FastAPI()
 
 # =========================
-# STATE
+# STATE (LEARNING CORE)
 # =========================
 STATE = {
     "equity": 100.0,
     "cache": None,
     "cache_time": 0,
-    "last_error": None
+    "last_error": None,
+
+    # MEMORY SYSTEM
+    "memory": {}  # symbol -> {"ema": float, "count": int}
 }
 
 CACHE_TTL = 60
@@ -25,8 +27,8 @@ CACHE_TTL = 60
 @app.get("/")
 def home():
     return {
-        "model": "ATLAS_CANONICAL_V2",
-        "status": "REGIME_AWARE_QUANT_SYSTEM"
+        "model": "ATLAS_CANONICAL_V3",
+        "status": "LEARNING_QUANT_CORE_ACTIVE"
     }
 
 
@@ -39,15 +41,15 @@ def update():
         return run_system()
     except Exception as e:
         return {
-            "model": "ATLAS_CANONICAL_V2",
-            "status": "SAFE_ERROR",
+            "model": "ATLAS_CANONICAL_V3",
+            "status": "SAFE_ERROR_HANDLED",
             "error": str(e),
             "equity": STATE["equity"]
         }
 
 
 # =========================
-# DATA FETCH (SAFE + CACHE)
+# DATA FETCH
 # =========================
 def fetch_market():
 
@@ -88,7 +90,7 @@ def fetch_market():
 
 
 # =========================
-# NORMALIZE
+# NORMALIZATION
 # =========================
 def normalize(x):
 
@@ -101,72 +103,49 @@ def normalize(x):
 
 
 # =========================
-# REGIME DETECTION
+# MEMORY UPDATE (EMA STYLE)
 # =========================
-def detect_regime(market):
+def update_memory(symbol, score):
 
-    changes = [m["change"] for m in market]
+    if symbol not in STATE["memory"]:
+        STATE["memory"][symbol] = {
+            "ema": score,
+            "count": 1
+        }
+    else:
+        m = STATE["memory"][symbol]
 
-    avg = statistics.mean(changes)
+        alpha = 0.2  # learning rate
 
-    if avg > 1.2:
-        return "BULL"
-    elif avg < -1.2:
-        return "BEAR"
-    return "NEUTRAL"
+        m["ema"] = (alpha * score) + ((1 - alpha) * m["ema"])
+        m["count"] += 1
 
 
 # =========================
-# SCORE ENGINE (V2)
+# SCORE ENGINE (LEARNING-BASED)
 # =========================
-def score(asset, regime):
+def score(asset):
 
     change = asset["change"]
     volume = asset["volume"]
     rank = asset["rank"]
 
     momentum = change / 10
-    vol_score = math.log1p(volume)
+    volume_score = math.log1p(volume)
     rank_score = 1 - min(rank / 100, 1)
 
-    # regime adjustment
-    regime_factor = 1.2 if regime == "BULL" else 0.9 if regime == "BEAR" else 1.0
-
-    # volatility penalty (stability proxy)
     stability = 1 / (1 + abs(momentum))
 
-    # BTC anchor effect
-    btc_anchor = 1.0 if asset["symbol"] == "BTC" else 0.0
-
     return (
-        (momentum * 0.30 +
-         vol_score * 0.25 +
-         rank_score * 0.25 +
-         stability * 0.20) * regime_factor
-        + btc_anchor * 0.5
+        momentum * 0.30 +
+        volume_score * 0.25 +
+        rank_score * 0.25 +
+        stability * 0.20
     )
 
 
 # =========================
-# PORTFOLIO BUILDER
-# =========================
-def build_portfolio(scored):
-
-    top = scored[:5]
-
-    total = sum(abs(x["score"]) for x in top) or 1
-
-    return [
-        {
-            "symbol": x["symbol"],
-            "weight": round(abs(x["score"]) / total, 4)
-        }
-        for x in top
-    ]
-
-
-# =========================
-# MAIN ENGINE V2
+# MAIN LEARNING ENGINE
 # =========================
 def run_system():
 
@@ -174,37 +153,52 @@ def run_system():
 
     market = [normalize(x) for x in raw]
 
-    regime = detect_regime(market)
-
     scored = []
 
     for x in market:
 
-        s = score(x, regime)
+        base_score = score(x)
+
+        symbol = x["symbol"]
+
+        update_memory(symbol, base_score)
+
+        memory_score = STATE["memory"][symbol]["ema"]
+
+        # 🔥 combine real-time + learned memory
+        final_score = (base_score * 0.6) + (memory_score * 0.4)
 
         scored.append({
-            "symbol": x["symbol"],
-            "score": round(s, 6),
-            "momentum": x["change"],
+            "symbol": symbol,
+            "score": round(final_score, 6),
+            "raw_score": round(base_score, 6),
+            "ema_score": round(memory_score, 6),
             "rank": x["rank"]
         })
 
     scored.sort(key=lambda x: x["score"], reverse=True)
 
-    portfolio = build_portfolio(scored)
+    top10 = scored[:10]
 
-    STATE["equity"] += sum(x["score"] for x in scored[:10]) / 20000
+    total = sum(abs(x["score"]) for x in top10) or 1
 
-    confidence = min(1.0, abs(sum(x["score"] for x in scored[:10])) / 50)
+    portfolio = [
+        {
+            "symbol": x["symbol"],
+            "weight": round(abs(x["score"]) / total, 4)
+        }
+        for x in top10[:5]
+    ]
+
+    # equity feedback loop (learning signal)
+    STATE["equity"] += sum(x["score"] for x in top10) / 20000
 
     return {
-        "model": "ATLAS_CANONICAL_V2",
+        "model": "ATLAS_CANONICAL_V3",
         "status": "OK",
-        "regime": regime,
-        "confidence": round(confidence, 4),
-        "top10": scored[:10],
+        "top10": top10,
         "portfolio": portfolio,
         "equity": round(STATE["equity"], 4),
-        "last_error": STATE["last_error"],
-        "cache_age": round(time.time() - STATE["cache_time"], 2)
+        "memory_size": len(STATE["memory"]),
+        "last_error": STATE["last_error"]
     }
