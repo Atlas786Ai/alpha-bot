@@ -1,31 +1,31 @@
 from fastapi import FastAPI
-import urllib.request
-import urllib.parse
-import json
+import requests
 import time
-import math
+import numpy as np
 
 app = FastAPI()
 
 # =========================
-# STATE (PERSISTENT MEMORY)
+# STATE MEMORY
 # =========================
 STATE = {
+    "cache": None,
     "cache_time": 0,
-    "cache_data": None,
     "equity": 100.0,
-    "btc_last": 0.0
+    "history": {}
 }
+
+COINS_LIMIT = 100
 
 
 # =========================
-# ROOT
+# HOME
 # =========================
 @app.get("/")
 def home():
     return {
-        "model": "V40_REAL_QUANT_MAIN",
-        "status": "ANCHOR + ENGINE V33 CONNECTED"
+        "model": "V41_QUANT_SYSTEM_FULL_STACK",
+        "status": "MAIN + ENGINE SYNC ACTIVE"
     }
 
 
@@ -34,7 +34,7 @@ def home():
 # =========================
 @app.get("/update")
 def update():
-    return run_v40()
+    return run_v41()
 
 
 # =========================
@@ -42,32 +42,25 @@ def update():
 # =========================
 def fetch_market():
 
-    if STATE["cache_data"] and time.time() - STATE["cache_time"] < 60:
-        return STATE["cache_data"]
+    if STATE["cache"] and time.time() - STATE["cache_time"] < 60:
+        return STATE["cache"]
 
     try:
-
-        url = "https://api.coingecko.com/api/v3/coins/markets"
-
-        params = {
-            "vs_currency": "usd",
-            "order": "market_cap_desc",
-            "per_page": 100,
-            "page": 1,
-            "sparkline": "false"
-        }
-
-        query = urllib.parse.urlencode(params)
-
-        req = urllib.request.Request(
-            url + "?" + query,
-            headers={"User-Agent": "Mozilla/5.0"}
+        r = requests.get(
+            "https://api.coingecko.com/api/v3/coins/markets",
+            params={
+                "vs_currency": "usd",
+                "order": "market_cap_desc",
+                "per_page": COINS_LIMIT,
+                "page": 1,
+                "sparkline": "false"
+            },
+            timeout=10
         )
 
-        raw = urllib.request.urlopen(req, timeout=6).read()
-        data = json.loads(raw)
+        data = r.json()
 
-        STATE["cache_data"] = data
+        STATE["cache"] = data
         STATE["cache_time"] = time.time()
 
         return data
@@ -77,38 +70,68 @@ def fetch_market():
 
 
 # =========================
-# ENGINE IMPORT (V33 LOGIC INLINE)
+# ENGINE V41 CORE
 # =========================
-def engine_score(asset, btc):
+def engine_v41(asset, btc):
 
-    import math
+    # normalize momentum
+    momentum = (asset["change"] or 0) / 10
 
-    momentum = asset["change"] / 10
-    rel = asset["change"] - btc
-    volume = math.log1p(asset["volume"])
-    rank = 1 - (asset["rank"] / 100)
+    # relative strength anchor
+    rel = (asset["change"] or 0) - btc
 
-    stability = 1 / (1 + abs(momentum))
+    # log volume stabilization
+    volume = np.log1p(asset["volume"] or 1)
 
-    return (
-        rel * 0.35 +
-        momentum * 0.20 +
+    # rank stability (0-1)
+    rank = 1 - min(asset["rank"] / 100, 1)
+
+    # memory influence (trend persistence)
+    symbol = asset["symbol"]
+
+    prev = STATE["history"].get(symbol, 0)
+
+    memory_factor = 0.7 * prev + 0.3 * rel
+
+    # final score (balanced quant model)
+    score = (
+        rel * 0.30 +
+        momentum * 0.15 +
         volume * 0.20 +
         rank * 0.15 +
-        stability * 0.10
+        memory_factor * 0.20
     )
 
+    # update memory
+    STATE["history"][symbol] = memory_factor
+
+    return score
+
 
 # =========================
-# MAIN V40 ENGINE
+# REGIME DETECTOR
 # =========================
-def run_v40():
+def detect_regime(top_score):
+
+    if top_score > 30:
+        return "EXPANSION"
+
+    if top_score > 15:
+        return "TREND"
+
+    return "CHOP"
+
+
+# =========================
+# MAIN V41 ENGINE
+# =========================
+def run_v41():
 
     market = fetch_market()
 
     if not market:
         return {
-            "model": "V40_REAL_QUANT_MAIN",
+            "model": "V41_QUANT_SYSTEM_FULL_STACK",
             "status": "NO_DATA"
         }
 
@@ -124,12 +147,12 @@ def run_v40():
 
         asset = {
             "symbol": m["symbol"].upper(),
-            "change": m.get("price_change_percentage_24h", 0) or 0,
-            "volume": m.get("total_volume", 0),
+            "change": m.get("price_change_percentage_24h", 0),
+            "volume": m.get("total_volume", 1),
             "rank": m.get("market_cap_rank", 100)
         }
 
-        score = engine_score(asset, btc)
+        score = engine_v41(asset, btc)
 
         scored.append({
             "symbol": asset["symbol"],
@@ -138,11 +161,14 @@ def run_v40():
             "rank": asset["rank"]
         })
 
+    # sort
     scored.sort(key=lambda x: x["score"], reverse=True)
 
     top10 = scored[:10]
 
-    # portfolio (stable weights)
+    regime = detect_regime(top10[0]["score"])
+
+    # portfolio allocation
     total = sum(max(x["score"], 0.0001) for x in top10)
 
     portfolio = [
@@ -153,13 +179,14 @@ def run_v40():
         for x in top10[:5]
     ]
 
-    # equity simulation (slower, more realistic)
-    STATE["equity"] += sum(x["score"] for x in top10) / 5000
+    # equity update (smoothed)
+    STATE["equity"] += np.mean([x["score"] for x in top10]) / 3000
 
     return {
-        "model": "V40_REAL_QUANT_MAIN",
+        "model": "V41_QUANT_SYSTEM_FULL_STACK",
+        "regime": regime,
         "top10": top10,
         "portfolio": portfolio,
         "equity": round(STATE["equity"], 4),
-        "btc_anchor": btc
+        "memory_size": len(STATE["history"])
     }
