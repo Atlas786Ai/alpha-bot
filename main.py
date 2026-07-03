@@ -9,138 +9,112 @@ app = FastAPI()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
+COINS = [
+    "BTC","ETH","SOL","ARB","AVAX","DOGE","MATIC","OP","LINK","UNI",
+    "AAVE","INJ","TIA","NEAR","APT","SUI","LTC","XRP","BNB","FTM"
+]
 
 
 # =========================
-# MEMORY + CACHE LAYER
+# MEMORY STORE (REAL CORE)
 # =========================
-CACHE = {
-    "data": None,
-    "timestamp": 0,
-    "ttl": 60  # 1 minute cache
+MEMORY = {
+    coin: {
+        "ema": 0,
+        "confidence": 0.5,
+        "rank": 999,
+        "last_seen": time.time()
+    }
+    for coin in COINS
 }
 
-
-# =========================
-# 100 COIN UNIVERSE (BASE LIST)
-# =========================
-UNIVERSE = [
-    "btc","eth","sol","arb","avax","doge","matic","op","link","uni",
-    "aave","inj","tia","near","apt","sui","ltc","xrp","bnb","ftm"
-] * 5   # expand to simulate 100 coins
+ALPHA = 0.2  # EMA smoothing factor
 
 
 # =========================
-# SMART FETCH WITH CACHE
+# MARKET SIM / LIVE HYBRID
 # =========================
-def fetch_market():
+def market_data():
 
-    now = time.time()
-
-    # 🔥 CACHE HIT
-    if CACHE["data"] and now - CACHE["timestamp"] < CACHE["ttl"]:
-        return CACHE["data"]
-
-    headers = {"User-Agent": "Mozilla/5.0"}
-
-    try:
-
-        params = {
-            "vs_currency": "usd",
-            "order": "market_cap_desc",
-            "per_page": 50,
-            "page": 1,
-            "sparkline": "false"
-        }
-
-        r = requests.get(
-            COINGECKO_URL,
-            params=params,
-            headers=headers,
-            timeout=8
-        )
-
-        data = r.json()
-
-        if isinstance(data, list) and len(data) > 0:
-
-            CACHE["data"] = data
-            CACHE["timestamp"] = now
-
-            return data
-
-    except:
-        pass
-
-    # 🔥 FALLBACK
-    return [
-        {"symbol": c, "price_change_percentage_24h": random.uniform(-2, 5)}
-        for c in UNIVERSE[:20]
-    ]
+    return {
+        c: random.uniform(-3, 6) for c in COINS
+    }
 
 
 # =========================
-# SCORING ENGINE
+# EMA UPDATE ENGINE
 # =========================
-def score_assets(data):
+def update_memory(market):
 
     scored = []
 
-    for d in data:
+    for coin, momentum in market.items():
 
-        try:
+        prev = MEMORY[coin]["ema"]
 
-            momentum = d.get("price_change_percentage_24h", 0)
+        ema = (ALPHA * momentum) + ((1 - ALPHA) * prev)
 
-            volatility = random.uniform(0.01, 0.2)
+        # confidence grows with stability
+        diff = abs(ema - prev)
 
-            score = (momentum * 10) - (volatility * 5) + random.uniform(-1, 1)
+        confidence = max(0.1, min(1.0, MEMORY[coin]["confidence"] + (0.05 if diff < 1 else -0.05)))
 
-            scored.append({
-                "symbol": d.get("symbol", "UNK").upper(),
-                "score": round(score, 3),
-                "momentum": round(momentum, 3)
-            })
+        MEMORY[coin]["ema"] = ema
+        MEMORY[coin]["confidence"] = confidence
+        MEMORY[coin]["last_seen"] = time.time()
 
-        except:
-            continue
+        score = ema * confidence * 10
 
-    return sorted(scored, key=lambda x: x["score"], reverse=True)
+        scored.append({
+            "symbol": coin,
+            "score": round(score, 3),
+            "ema": round(ema, 3),
+            "confidence": round(confidence, 3)
+        })
+
+    return scored
 
 
 # =========================
-# REGIME DETECTOR (IMPROVED)
+# STABILITY SORT (ANTI-NOISE)
 # =========================
-def detect_regime(top_score):
+def stable_rank(scored):
 
-    if top_score > 50:
+    scored.sort(key=lambda x: x["score"], reverse=True)
+
+    for i, s in enumerate(scored):
+
+        MEMORY[s["symbol"]]["rank"] = i + 1
+
+    return scored
+
+
+# =========================
+# REGIME DETECTOR
+# =========================
+def detect_regime(top):
+
+    if top > 50:
         return "EXPLOSIVE_ROTATION"
 
-    if top_score > 20:
+    if top > 20:
         return "TREND"
 
     return "CHOP"
 
 
 # =========================
-# SAFE AI ENGINE
+# AI CORE
 # =========================
 def ai_engine():
 
-    market = fetch_market()
+    market = market_data()
 
-    scored = score_assets(market)
+    scored = update_memory(market)
 
-    if len(scored) == 0:
+    ranked = stable_rank(scored)
 
-        return {
-            "model": "V37_SAFE",
-            "status": "NO_DATA_FALLBACK",
-            "top10": []
-        }
-
-    top10 = scored[:10]
+    top10 = ranked[:10]
 
     regime = detect_regime(top10[0]["score"])
 
@@ -156,30 +130,24 @@ def ai_engine():
         })
 
     return {
-        "model": "V37_QUANT_NETWORK_INTELLIGENCE",
+        "model": "V38_MEMORY_QUANT_CORE",
         "regime": regime,
         "top10": top10,
         "portfolio": portfolio,
-        "cache_age_sec": int(time.time() - CACHE["timestamp"])
+        "memory": MEMORY
     }
 
 
 # =========================
-# TELEGRAM SAFE SEND
+# TELEGRAM
 # =========================
-def send_message(chat_id, text):
+def send(chat_id, text):
 
     try:
-
-        requests.post(
-            BASE_URL + "/sendMessage",
-            json={
-                "chat_id": chat_id,
-                "text": text
-            },
-            timeout=8
-        )
-
+        requests.post(BASE_URL + "/sendMessage", json={
+            "chat_id": chat_id,
+            "text": text
+        }, timeout=8)
     except:
         pass
 
@@ -188,64 +156,47 @@ def send_message(chat_id, text):
 # WEBHOOK
 # =========================
 @app.post("/webhook")
-async def webhook(request: Request):
+async def webhook(req: Request):
 
-    try:
+    data = await req.json()
 
-        data = await request.json()
+    msg = data["message"]["text"]
+    chat_id = data["message"]["chat"]["id"]
 
-        msg = data["message"]["text"]
-        chat_id = data["message"]["chat"]["id"]
+    ai = ai_engine()
 
-        ai = ai_engine()
+    if msg == "/start":
 
-        if msg == "/start":
+        send(chat_id, f"🚀 V38 MEMORY CORE ACTIVE\nREGIME: {ai['regime']}")
 
-            send_message(chat_id,
-                f"🚀 V37 QUANT ENGINE ONLINE\nREGIME: {ai['regime']}"
-            )
+    elif msg == "/update":
 
-        elif msg == "/update":
+        text = "📊 V38 QUANT CORE\n\n"
 
-            text = f"📊 V37 QUANT AI\nRegime: {ai['regime']}\n\nTOP 5:\n"
+        for x in ai["top10"][:5]:
 
-            for x in ai["top10"][:5]:
-                text += f"{x['symbol']} | {x['score']}\n"
+            text += f"{x['symbol']} | {x['score']} | conf:{x['confidence']}\n"
 
-            send_message(chat_id, text)
+        send(chat_id, text)
 
-        elif msg == "/portfolio":
+    elif msg == "/memory":
 
-            text = "💼 PORTFOLIO:\n"
+        top = sorted(ai["memory"].items(), key=lambda x: x[1]["ema"], reverse=True)[:5]
 
-            for p in ai["portfolio"]:
-                text += f"{p['symbol']} → {p['weight']}\n"
+        text = "🧠 MEMORY TOP 5:\n\n"
 
-            send_message(chat_id, text)
+        for k, v in top:
 
-        else:
+            text += f"{k} | EMA:{v['ema']:.2f} | RANK:{v['rank']}\n"
 
-            send_message(chat_id, "Commands: /start /update /portfolio")
-
-    except Exception as e:
-
-        print("WEBHOOK ERROR:", str(e))
+        send(chat_id, text)
 
     return {"ok": True}
 
 
 # =========================
-# HEALTH CHECK
+# TEST
 # =========================
-@app.get("/")
-def home():
-
-    return {
-        "system": "V37 QUANT NETWORK INTELLIGENCE",
-        "status": "OK"
-    }
-
-
 @app.get("/update")
 def update():
 
