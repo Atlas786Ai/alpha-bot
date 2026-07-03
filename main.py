@@ -13,7 +13,10 @@ STATE = {
     "cache": None,
     "cache_time": 0,
     "last_error": None,
-    "retry_count": 0
+    "source_health": {
+        "coingecko": True,
+        "binance": True
+    }
 }
 
 CACHE_TTL = 60
@@ -25,22 +28,34 @@ CACHE_TTL = 60
 @app.get("/")
 def home():
     return {
-        "model": "ATLAS_CANONICAL_V6",
-        "status": "INSTITUTIONAL_UNIVERSE_ENGINE"
+        "model": "ATLAS_CANONICAL_V7",
+        "status": "MULTI_SOURCE_INSTITUTIONAL_ENGINE"
     }
 
 
 # =========================
-# SAFE REQUEST WRAPPER
+# HEALTH CHECK
 # =========================
-def safe_request(url, params):
-
-    headers = {
-        "User-Agent": "Mozilla/5.0"
+@app.get("/health")
+def health():
+    return {
+        "model": "V7",
+        "coingecko": STATE["source_health"]["coingecko"],
+        "binance": STATE["source_health"]["binance"],
+        "cache_age": round(time.time() - STATE["cache_time"], 2),
+        "equity": STATE["equity"]
     }
+
+
+# =========================
+# SAFE REQUEST
+# =========================
+def safe_get(url, params=None):
+
+    headers = {"User-Agent": "Mozilla/5.0"}
 
     try:
-        r = requests.get(url, params=params, headers=headers, timeout=8)
+        r = requests.get(url, params=params, headers=headers, timeout=6)
 
         if r.status_code != 200:
             return None
@@ -58,104 +73,183 @@ def safe_request(url, params):
 
 
 # =========================
-# UNIVERSE BUILDER (FIXED 100-200 COINS)
+# BINANCE FALLBACK SOURCE
 # =========================
-def fetch_market():
+def fetch_binance():
 
-    # cache
-    if STATE["cache"] and time.time() - STATE["cache_time"] < CACHE_TTL:
-        return STATE["cache"]
+    try:
+        r = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=6)
+        data = r.json()
+
+        cleaned = []
+
+        for x in data[:50]:
+
+            if "USDT" in x["symbol"]:
+
+                cleaned.append({
+                    "symbol": x["symbol"].replace("USDT", ""),
+                    "change": float(x.get("priceChangePercent", 0)),
+                    "volume": float(x.get("quoteVolume", 0)),
+                    "rank": 50
+                })
+
+        return cleaned
+
+    except:
+        return []
+
+
+# =========================
+# COINGECKO SOURCE
+# =========================
+def fetch_coingecko():
 
     url = "https://api.coingecko.com/api/v3/coins/markets"
 
     params = {
         "vs_currency": "usd",
         "order": "market_cap_desc",
-        "per_page": 100,   # 🔥 institutional universe
+        "per_page": 100,
         "page": 1,
         "sparkline": "false"
     }
 
-    data = safe_request(url, params)
-
-    # 🔴 HARD SAFETY: if API fails, TRY again once
-    if data is None:
-
-        STATE["retry_count"] += 1
-
-        data = safe_request(url, params)
-
-    # 🔴 STILL FAIL → minimal fallback BUT expanded (not 5 coins anymore)
-    if data is None:
-
-        return [
-            {"symbol": "BTC", "price_change_percentage_24h": 1.0, "total_volume": 1000000, "market_cap_rank": 1},
-            {"symbol": "ETH", "price_change_percentage_24h": 0.8, "total_volume": 900000, "market_cap_rank": 2},
-            {"symbol": "SOL", "price_change_percentage_24h": 2.0, "total_volume": 700000, "market_cap_rank": 5},
-            {"symbol": "ARB", "price_change_percentage_24h": 3.0, "total_volume": 300000, "market_cap_rank": 20},
-            {"symbol": "AVAX", "price_change_percentage_24h": 1.5, "total_volume": 500000, "market_cap_rank": 10},
-            {"symbol": "LINK", "price_change_percentage_24h": 2.2, "total_volume": 600000, "market_cap_rank": 12},
-            {"symbol": "INJ", "price_change_percentage_24h": 3.4, "total_volume": 250000, "market_cap_rank": 25},
-            {"symbol": "TIA", "price_change_percentage_24h": 3.1, "total_volume": 200000, "market_cap_rank": 30},
-            {"symbol": "OP", "price_change_percentage_24h": 2.5, "total_volume": 400000, "market_cap_rank": 15},
-            {"symbol": "MATIC", "price_change_percentage_24h": 1.7, "total_volume": 800000, "market_cap_rank": 11}
-        ]
-
-    STATE["cache"] = data
-    STATE["cache_time"] = time.time()
-
-    return data
+    return safe_get(url, params)
 
 
 # =========================
-# NORMALIZER (SAFE)
+# UNIVERSE BUILDER (MULTI-SOURCE MERGE)
 # =========================
-def normalize(x):
+def build_universe():
 
-    return {
-        "symbol": (x.get("symbol") or "UNK").upper(),
-        "change": float(x.get("price_change_percentage_24h") or 0),
-        "volume": float(x.get("total_volume") or 1),
-        "rank": int(x.get("market_cap_rank") or 100)
-    }
+    cg = fetch_coingecko()
+    bn = fetch_binance()
+
+    universe = []
+
+    if cg:
+        STATE["source_health"]["coingecko"] = True
+
+        for x in cg:
+            universe.append({
+                "symbol": x.get("symbol", "").upper(),
+                "change": x.get("price_change_percentage_24h", 0) or 0,
+                "volume": x.get("total_volume", 0) or 0,
+                "rank": x.get("market_cap_rank", 999)
+            })
+
+    else:
+        STATE["source_health"]["coingecko"] = False
+
+    if bn:
+        STATE["source_health"]["binance"] = True
+        universe.extend(bn)
+    else:
+        STATE["source_health"]["binance"] = False
+
+    # deduplicate (critical V7 improvement)
+    seen = set()
+    unique = []
+
+    for x in universe:
+        if x["symbol"] not in seen:
+            seen.add(x["symbol"])
+            unique.append(x)
+
+    return unique
 
 
 # =========================
-# SCORE ENGINE
+# REGIME DETECTION (MARKET STATE)
 # =========================
-def score(x):
+def detect_regime(market):
+
+    changes = [x["change"] for x in market if x["change"] is not None]
+
+    if not changes:
+        return "UNKNOWN"
+
+    avg = sum(changes) / len(changes)
+
+    if avg > 1.5:
+        return "BULL"
+    elif avg < -1.5:
+        return "BEAR"
+    return "CHOP"
+
+
+# =========================
+# SCORE ENGINE (V7)
+# =========================
+def score(x, regime):
 
     momentum = x["change"] / 10
-    volume = math.log1p(x["volume"])
+    liquidity = math.log1p(x["volume"])
     rank = 1 - min(x["rank"] / 100, 1)
 
     stability = 1 / (1 + abs(momentum))
 
-    return momentum * 0.3 + volume * 0.25 + rank * 0.25 + stability * 0.2
+    regime_factor = {
+        "BULL": 1.15,
+        "BEAR": 0.85,
+        "CHOP": 1.0,
+        "UNKNOWN": 1.0
+    }[regime]
+
+    return (
+        momentum * 0.28 +
+        liquidity * 0.25 +
+        rank * 0.22 +
+        stability * 0.25
+    ) * regime_factor
 
 
 # =========================
-# ENGINE V6
+# CORRELATION DAMPENER (SIMPLIFIED)
+# =========================
+def dampen(scores):
+
+    symbols = set()
+    result = []
+
+    for x in scores:
+
+        # reduce duplication of same exposure
+        if x["symbol"] in symbols:
+            x["score"] *= 0.7
+        else:
+            symbols.add(x["symbol"])
+
+        result.append(x)
+
+    return result
+
+
+# =========================
+# UPDATE ENGINE V7
 # =========================
 @app.get("/update")
 def update():
 
-    raw = fetch_market()
+    market = build_universe()
 
-    market = [normalize(x) for x in raw]
+    regime = detect_regime(market)
 
     scored = []
 
     for x in market:
 
-        s = score(x)
+        s = score(x, regime)
 
         scored.append({
             "symbol": x["symbol"],
             "score": round(s, 6),
-            "momentum": x["change"],
+            "change": x["change"],
             "rank": x["rank"]
         })
+
+    scored = dampen(scored)
 
     scored.sort(key=lambda x: x["score"], reverse=True)
 
@@ -171,15 +265,16 @@ def update():
         for x in top10[:5]
     ]
 
-    STATE["equity"] += sum(x["score"] for x in top10) / 20000
+    STATE["equity"] += sum(x["score"] for x in top10) / 25000
 
     return {
-        "model": "ATLAS_CANONICAL_V6",
-        "status": "INSTITUTIONAL_READY",
+        "model": "ATLAS_CANONICAL_V7",
+        "status": "MULTI_SOURCE_ACTIVE",
+        "regime": regime,
         "universe_size": len(scored),
-        "retry_count": STATE["retry_count"],
         "top10": top10,
         "portfolio": portfolio,
         "equity": round(STATE["equity"], 4),
+        "sources": STATE["source_health"],
         "last_error": STATE["last_error"]
     }
