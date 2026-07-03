@@ -2,6 +2,7 @@ from fastapi import FastAPI
 import requests
 import time
 import math
+import statistics
 
 app = FastAPI()
 
@@ -9,9 +10,8 @@ app = FastAPI()
 # STATE
 # =========================
 STATE = {
-    "cache": None,
-    "cache_time": 0,
     "equity": 100.0,
+    "history_equity": [],
     "last_error": None
 }
 
@@ -19,14 +19,13 @@ COINS_LIMIT = 100
 
 
 # =========================
-# ROOT
+# HOME
 # =========================
 @app.get("/")
 def home():
     return {
-        "model": "V43_MULTI_SOURCE_QUANT_ENGINE",
-        "status": "LIVE",
-        "note": "MAIN + ENGINE ACTIVE"
+        "model": "V44_INSTITUTIONAL_QUANT",
+        "status": "LIVE HEDGE-FUND STYLE ENGINE"
     }
 
 
@@ -35,13 +34,13 @@ def home():
 # =========================
 @app.get("/update")
 def update():
-    return run_v43()
+    return run_v44()
 
 
 # =========================
-# COINGECKO SOURCE
+# DATA SOURCE (SAFE)
 # =========================
-def fetch_coingecko():
+def fetch_market():
 
     try:
         r = requests.get(
@@ -64,76 +63,57 @@ def fetch_coingecko():
     except Exception as e:
         STATE["last_error"] = str(e)
 
-    return None
+    return []
 
 
 # =========================
-# BINANCE FALLBACK SOURCE
+# REGIME DETECTOR (REALISTIC)
 # =========================
-def fetch_binance():
+def detect_regime(market):
 
-    try:
-        r = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=8)
-
-        data = r.json()
-
-        out = []
-
-        for d in data:
-
-            if "USDT" in d["symbol"]:
-
-                out.append({
-                    "symbol": d["symbol"].replace("USDT", ""),
-                    "price_change_percentage_24h": float(d.get("priceChangePercent", 0)),
-                    "total_volume": float(d.get("volume", 0)),
-                    "market_cap_rank": 50
-                })
-
-        if len(out) > 10:
-            return out
-
-    except Exception as e:
-        STATE["last_error"] = str(e)
-
-    return None
-
-
-# =========================
-# UNIFIED DATA LAYER
-# =========================
-def get_market():
-
-    data = fetch_coingecko()
-
-    if data:
-        return data
-
-    data = fetch_binance()
-
-    if data:
-        return data
-
-    # FINAL SAFE FALLBACK (NO CRASH EVER)
-    return [
-        {"symbol": "BTC", "price_change_percentage_24h": 1.0, "total_volume": 1000000, "market_cap_rank": 1},
-        {"symbol": "ETH", "price_change_percentage_24h": 0.8, "total_volume": 900000, "market_cap_rank": 2},
-        {"symbol": "SOL", "price_change_percentage_24h": 2.0, "total_volume": 700000, "market_cap_rank": 5},
-        {"symbol": "ARB", "price_change_percentage_24h": 3.0, "total_volume": 300000, "market_cap_rank": 20},
-        {"symbol": "AVAX", "price_change_percentage_24h": 1.5, "total_volume": 500000, "market_cap_rank": 10}
+    changes = [
+        m.get("price_change_percentage_24h") or 0
+        for m in market
     ]
 
+    avg = statistics.mean(changes)
+
+    if avg > 1.5:
+        return "BULL"
+
+    if avg < -1.5:
+        return "BEAR"
+
+    return "ACCUMULATION"
+
 
 # =========================
-# SCORING ENGINE
+# VOLATILITY
 # =========================
-def score(asset, btc):
+def volatility(market):
+
+    changes = [
+        m.get("price_change_percentage_24h") or 0
+        for m in market
+    ]
+
+    if len(changes) < 2:
+        return 0
+
+    return statistics.pstdev(changes)
+
+
+# =========================
+# SCORE ENGINE V44
+# =========================
+def score(asset, btc, vol_regime):
 
     change = asset.get("price_change_percentage_24h") or 0
     volume = asset.get("total_volume") or 1
     rank = asset.get("market_cap_rank") or 100
 
     rel = change - btc
+
     momentum = change / 10
 
     volume_log = math.log1p(volume)
@@ -142,21 +122,73 @@ def score(asset, btc):
 
     stability = 1 / (1 + abs(momentum))
 
+    # volatility penalty (IMPORTANT NEW)
+    vol_penalty = 1 / (1 + vol_regime)
+
     return (
         rel * 0.30 +
         momentum * 0.20 +
         volume_log * 0.20 +
         rank_score * 0.15 +
-        stability * 0.15
+        stability * 0.10 +
+        vol_penalty * 0.05
     )
 
 
 # =========================
-# MAIN ENGINE V43
+# SHARPE-LIKE EQUITY TRACKER
 # =========================
-def run_v43():
+def update_equity(return_val):
 
-    market = get_market()
+    STATE["equity"] += return_val
+
+    STATE["history_equity"].append(STATE["equity"])
+
+    if len(STATE["history_equity"]) > 50:
+        STATE["history_equity"].pop(0)
+
+
+# =========================
+# MAX DRAWDOWN
+# =========================
+def max_drawdown():
+
+    equity = STATE["history_equity"]
+
+    if len(equity) < 2:
+        return 0
+
+    peak = equity[0]
+    max_dd = 0
+
+    for x in equity:
+
+        if x > peak:
+            peak = x
+
+        dd = (peak - x) / peak
+
+        max_dd = max(max_dd, dd)
+
+    return max_dd
+
+
+# =========================
+# MAIN ENGINE V44
+# =========================
+def run_v44():
+
+    market = fetch_market()
+
+    if not market:
+        return {
+            "model": "V44_INSTITUTIONAL_QUANT",
+            "status": "NO_DATA_SAFE_MODE"
+        }
+
+    # REGIME + VOLATILITY
+    reg = detect_regime(market)
+    vol = volatility(market)
 
     btc = 0
 
@@ -168,13 +200,12 @@ def run_v43():
 
     for m in market:
 
-        s = score(m, btc)
+        s = score(m, btc, vol)
 
         scored.append({
             "symbol": m.get("symbol","").upper(),
-            "score": round(s, 5),
-            "momentum": m.get("price_change_percentage_24h") or 0,
-            "rank": m.get("market_cap_rank") or 100
+            "score": round(s, 6),
+            "momentum": m.get("price_change_percentage_24h") or 0
         })
 
     scored.sort(key=lambda x: x["score"], reverse=True)
@@ -191,13 +222,19 @@ def run_v43():
         for x in top10[:5]
     ]
 
-    STATE["equity"] += sum(x["score"] for x in top10) / 10000
+    # simulated return (institutional proxy)
+    daily_return = sum(x["score"] for x in top10) / 20000
+
+    update_equity(daily_return)
+
+    dd = max_drawdown()
 
     return {
-        "model": "V43_MULTI_SOURCE_QUANT_ENGINE",
-        "status": "OK",
-        "top10": top10,
-        "portfolio": portfolio,
+        "model": "V44_INSTITUTIONAL_QUANT",
+        "regime": reg,
+        "volatility": round(vol, 4),
+        "max_drawdown": round(dd, 4),
         "equity": round(STATE["equity"], 4),
-        "error": STATE["last_error"]
+        "top10": top10,
+        "portfolio": portfolio
     }
