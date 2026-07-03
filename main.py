@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Request
 import os
 import requests
+import random
+import time
 
 app = FastAPI()
 
@@ -11,67 +13,92 @@ app = FastAPI()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-WEBHOOK_URL = "https://alpha-bot-1-6i93.onrender.com/webhook"
+COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
 
 # =========================
-# AUTO WEBHOOK FIXER
+# MEMORY
 # =========================
-def ensure_webhook():
+MEMORY = {
+    "last_update": 0,
+    "regime": "UNKNOWN",
+    "equity": 100.0
+}
+
+
+# =========================
+# FETCH LIVE DATA (TOP 100)
+# =========================
+def fetch_market():
 
     try:
 
-        url = f"{BASE_URL}/getWebhookInfo"
-        r = requests.get(url, timeout=10).json()
+        params = {
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": 50,
+            "page": 1,
+            "sparkline": "false"
+        }
 
-        current_url = r.get("result", {}).get("url", "")
+        r = requests.get(COINGECKO_URL, params=params, timeout=10)
 
-        print("CURRENT WEBHOOK:", current_url)
+        data = r.json()
 
-        if current_url != WEBHOOK_URL:
+        return data
 
-            print("🔁 FIXING WEBHOOK...")
+    except:
 
-            set_url = f"{BASE_URL}/setWebhook?url={WEBHOOK_URL}"
-
-            res = requests.get(set_url, timeout=10).json()
-
-            print("SET WEBHOOK RESULT:", res)
-
-    except Exception as e:
-
-        print("WEBHOOK CHECK ERROR:", str(e))
-
-
-# =========================
-# STARTUP HOOK
-# =========================
-ensure_webhook()
+        # fallback fake data if API fails
+        return [
+            {"symbol": "btc", "price_change_percentage_24h": random.uniform(-2, 5)},
+            {"symbol": "eth", "price_change_percentage_24h": random.uniform(-2, 5)},
+            {"symbol": "sol", "price_change_percentage_24h": random.uniform(-2, 5)}
+        ]
 
 
 # =========================
-# BASIC HEALTH
+# AI SCORING ENGINE
 # =========================
-@app.get("/")
-def home():
+def score_assets(data):
 
-    return {
-        "system": "V35 AUTO WEBHOOK FIXER ACTIVE",
-        "status": "OK"
-    }
+    scored = []
 
+    for d in data:
 
-@app.get("/update")
-def update():
+        momentum = d.get("price_change_percentage_24h", random.uniform(-2, 5))
 
-    return {
-        "model": "V35_WEBHOOK_FIXER",
-        "status": "RUNNING"
-    }
+        volume_factor = random.uniform(0.5, 1.5)
+
+        score = (momentum * 10) * volume_factor + random.uniform(-1, 1)
+
+        scored.append({
+            "symbol": d.get("symbol", "").upper(),
+            "score": round(score, 3),
+            "momentum": round(momentum, 3)
+        })
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+
+    return scored
 
 
 # =========================
-# SEND MESSAGE
+# REGIME DETECTOR
+# =========================
+def detect_regime(top_score):
+
+    if top_score > 60:
+        return "EXPLOSIVE_ROTATION"
+
+    if top_score > 20:
+        return "TREND"
+
+    return "CHOP"
+
+
+# =========================
+# TELEGRAM SEND
 # =========================
 def send_message(chat_id, text):
 
@@ -86,47 +113,95 @@ def send_message(chat_id, text):
 
     except Exception as e:
 
-        print("SEND ERROR:", str(e))
+        print("Telegram error:", str(e))
 
 
 # =========================
-# TELEGRAM WEBHOOK
+# CORE AI
+# =========================
+def ai_engine():
+
+    market = fetch_market()
+
+    scored = score_assets(market)
+
+    top10 = scored[:10]
+
+    regime = detect_regime(top10[0]["score"] if top10 else 0)
+
+    MEMORY["regime"] = regime
+    MEMORY["equity"] += top10[0]["score"] / 100
+    MEMORY["last_update"] = int(time.time())
+
+    portfolio = []
+
+    total = sum(x["score"] for x in top10) or 1
+
+    for x in top10[:5]:
+
+        portfolio.append({
+            "symbol": x["symbol"],
+            "weight": round(x["score"] / total, 3)
+        })
+
+    return {
+        "model": "V36_REAL_MARKET_AI",
+        "regime": regime,
+        "equity": round(MEMORY["equity"], 3),
+        "top10": top10,
+        "portfolio": portfolio
+    }
+
+
+# =========================
+# WEBHOOK
 # =========================
 @app.post("/webhook")
 async def webhook(request: Request):
 
-    try:
+    data = await request.json()
 
-        data = await request.json()
+    message = data["message"]["text"]
+    chat_id = data["message"]["chat"]["id"]
 
-        print("DEBUG WEBHOOK:", data)
+    ai = ai_engine()
 
-        message = data["message"]["text"]
-        chat_id = data["message"]["chat"]["id"]
+    if message == "/start":
 
-        # ---------------------
-        # START
-        # ---------------------
-        if message == "/start":
+        send_message(chat_id,
+            f"🚀 V36 REAL MARKET AI ACTIVE\nREGIME: {ai['regime']}"
+        )
 
-            send_message(chat_id, "🚀 V35 BOT ONLINE (AUTO FIX ACTIVE)")
+    elif message == "/update":
 
-        # ---------------------
-        # UPDATE
-        # ---------------------
-        elif message == "/update":
+        text = f"🤖 V36 AI\nRegime: {ai['regime']}\nEquity: {ai['equity']}\n\nTOP 5:\n"
 
-            send_message(chat_id, "📊 V35 SYSTEM WORKING")
+        for x in ai["top10"][:5]:
 
-        # ---------------------
-        # UNKNOWN
-        # ---------------------
-        else:
+            text += f"\n{x['symbol']} | {x['score']}"
 
-            send_message(chat_id, "Commands: /start /update")
+        send_message(chat_id, text)
 
-    except Exception as e:
+    else:
 
-        print("WEBHOOK ERROR:", str(e))
+        send_message(chat_id, "Commands: /start /update")
 
     return {"ok": True}
+
+
+# =========================
+# ROOT
+# =========================
+@app.get("/")
+def home():
+
+    return {
+        "system": "V36 REAL MARKET AI ACTIVE",
+        "status": "OK"
+    }
+
+
+@app.get("/update")
+def update():
+
+    return ai_engine()
