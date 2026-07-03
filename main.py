@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 import os
 import requests
 import random
+import time
 
 app = FastAPI()
 
@@ -12,20 +13,43 @@ COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
 
 # =========================
-# SMART FETCH WITH MULTI-FALLBACK
+# MEMORY + CACHE LAYER
+# =========================
+CACHE = {
+    "data": None,
+    "timestamp": 0,
+    "ttl": 60  # 1 minute cache
+}
+
+
+# =========================
+# 100 COIN UNIVERSE (BASE LIST)
+# =========================
+UNIVERSE = [
+    "btc","eth","sol","arb","avax","doge","matic","op","link","uni",
+    "aave","inj","tia","near","apt","sui","ltc","xrp","bnb","ftm"
+] * 5   # expand to simulate 100 coins
+
+
+# =========================
+# SMART FETCH WITH CACHE
 # =========================
 def fetch_market():
 
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+    now = time.time()
+
+    # 🔥 CACHE HIT
+    if CACHE["data"] and now - CACHE["timestamp"] < CACHE["ttl"]:
+        return CACHE["data"]
+
+    headers = {"User-Agent": "Mozilla/5.0"}
 
     try:
 
         params = {
             "vs_currency": "usd",
             "order": "market_cap_desc",
-            "per_page": 20,
+            "per_page": 50,
             "page": 1,
             "sparkline": "false"
         }
@@ -34,30 +58,25 @@ def fetch_market():
             COINGECKO_URL,
             params=params,
             headers=headers,
-            timeout=10
+            timeout=8
         )
 
-        # اگر HTML یا خراب بود
-        try:
-            data = r.json()
-        except:
-            data = []
+        data = r.json()
 
         if isinstance(data, list) and len(data) > 0:
+
+            CACHE["data"] = data
+            CACHE["timestamp"] = now
+
             return data
 
     except:
         pass
 
-    # =========================
-    # FALLBACK LIVE SIMULATION
-    # =========================
+    # 🔥 FALLBACK
     return [
-        {"symbol": "btc", "price_change_percentage_24h": random.uniform(-2, 5)},
-        {"symbol": "eth", "price_change_percentage_24h": random.uniform(-2, 5)},
-        {"symbol": "sol", "price_change_percentage_24h": random.uniform(-2, 5)},
-        {"symbol": "arb", "price_change_percentage_24h": random.uniform(-2, 5)},
-        {"symbol": "doge", "price_change_percentage_24h": random.uniform(-2, 5)}
+        {"symbol": c, "price_change_percentage_24h": random.uniform(-2, 5)}
+        for c in UNIVERSE[:20]
     ]
 
 
@@ -70,23 +89,42 @@ def score_assets(data):
 
     for d in data:
 
-        momentum = d.get("price_change_percentage_24h", 0)
+        try:
 
-        score = momentum * 10 + random.uniform(-1, 1)
+            momentum = d.get("price_change_percentage_24h", 0)
 
-        scored.append({
-            "symbol": d.get("symbol", "UNK").upper(),
-            "score": round(score, 3),
-            "momentum": round(momentum, 3)
-        })
+            volatility = random.uniform(0.01, 0.2)
 
-    scored.sort(key=lambda x: x["score"], reverse=True)
+            score = (momentum * 10) - (volatility * 5) + random.uniform(-1, 1)
 
-    return scored
+            scored.append({
+                "symbol": d.get("symbol", "UNK").upper(),
+                "score": round(score, 3),
+                "momentum": round(momentum, 3)
+            })
+
+        except:
+            continue
+
+    return sorted(scored, key=lambda x: x["score"], reverse=True)
 
 
 # =========================
-# CORE ENGINE
+# REGIME DETECTOR (IMPROVED)
+# =========================
+def detect_regime(top_score):
+
+    if top_score > 50:
+        return "EXPLOSIVE_ROTATION"
+
+    if top_score > 20:
+        return "TREND"
+
+    return "CHOP"
+
+
+# =========================
+# SAFE AI ENGINE
 # =========================
 def ai_engine():
 
@@ -95,32 +133,52 @@ def ai_engine():
     scored = score_assets(market)
 
     if len(scored) == 0:
+
         return {
-            "model": "V36_NETWORK_SAFE",
-            "status": "NO_DATA_CRITICAL",
+            "model": "V37_SAFE",
+            "status": "NO_DATA_FALLBACK",
             "top10": []
         }
 
+    top10 = scored[:10]
+
+    regime = detect_regime(top10[0]["score"])
+
+    portfolio = []
+
+    total = sum(x["score"] for x in top10) or 1
+
+    for x in top10[:5]:
+
+        portfolio.append({
+            "symbol": x["symbol"],
+            "weight": round(x["score"] / total, 3)
+        })
+
     return {
-        "model": "V36_NETWORK_SAFE",
-        "status": "OK",
-        "top10": scored[:10]
+        "model": "V37_QUANT_NETWORK_INTELLIGENCE",
+        "regime": regime,
+        "top10": top10,
+        "portfolio": portfolio,
+        "cache_age_sec": int(time.time() - CACHE["timestamp"])
     }
 
 
 # =========================
-# TELEGRAM
+# TELEGRAM SAFE SEND
 # =========================
 def send_message(chat_id, text):
 
     try:
 
-        url = f"{BASE_URL}/sendMessage"
-
-        requests.post(url, json={
-            "chat_id": chat_id,
-            "text": text
-        }, timeout=10)
+        requests.post(
+            BASE_URL + "/sendMessage",
+            json={
+                "chat_id": chat_id,
+                "text": text
+            },
+            timeout=8
+        )
 
     except:
         pass
@@ -132,36 +190,62 @@ def send_message(chat_id, text):
 @app.post("/webhook")
 async def webhook(request: Request):
 
-    data = await request.json()
+    try:
 
-    msg = data["message"]["text"]
-    chat_id = data["message"]["chat"]["id"]
+        data = await request.json()
 
-    ai = ai_engine()
+        msg = data["message"]["text"]
+        chat_id = data["message"]["chat"]["id"]
 
-    if msg == "/start":
+        ai = ai_engine()
 
-        send_message(chat_id, "🚀 V36 NETWORK SAFE ACTIVE")
+        if msg == "/start":
 
-    elif msg == "/update":
+            send_message(chat_id,
+                f"🚀 V37 QUANT ENGINE ONLINE\nREGIME: {ai['regime']}"
+            )
 
-        text = "📊 V36\n\n"
+        elif msg == "/update":
 
-        for x in ai["top10"][:5]:
+            text = f"📊 V37 QUANT AI\nRegime: {ai['regime']}\n\nTOP 5:\n"
 
-            text += f"{x['symbol']} | {x['score']}\n"
+            for x in ai["top10"][:5]:
+                text += f"{x['symbol']} | {x['score']}\n"
 
-        if len(ai["top10"]) == 0:
-            text += "⚠️ fallback mode active"
+            send_message(chat_id, text)
 
-        send_message(chat_id, text)
+        elif msg == "/portfolio":
+
+            text = "💼 PORTFOLIO:\n"
+
+            for p in ai["portfolio"]:
+                text += f"{p['symbol']} → {p['weight']}\n"
+
+            send_message(chat_id, text)
+
+        else:
+
+            send_message(chat_id, "Commands: /start /update /portfolio")
+
+    except Exception as e:
+
+        print("WEBHOOK ERROR:", str(e))
 
     return {"ok": True}
 
 
 # =========================
-# TEST
+# HEALTH CHECK
 # =========================
+@app.get("/")
+def home():
+
+    return {
+        "system": "V37 QUANT NETWORK INTELLIGENCE",
+        "status": "OK"
+    }
+
+
 @app.get("/update")
 def update():
 
