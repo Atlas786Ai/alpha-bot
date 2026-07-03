@@ -1,15 +1,10 @@
 from fastapi import FastAPI, Request
 import os
 import requests
-import random
 import time
 
 app = FastAPI()
 
-
-# =========================
-# CONFIG
-# =========================
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -17,17 +12,7 @@ COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
 
 # =========================
-# MEMORY
-# =========================
-MEMORY = {
-    "last_update": 0,
-    "regime": "UNKNOWN",
-    "equity": 100.0
-}
-
-
-# =========================
-# FETCH LIVE DATA (TOP 100)
+# SAFE MARKET FETCH
 # =========================
 def fetch_market():
 
@@ -36,7 +21,7 @@ def fetch_market():
         params = {
             "vs_currency": "usd",
             "order": "market_cap_desc",
-            "per_page": 50,
+            "per_page": 20,
             "page": 1,
             "sparkline": "false"
         }
@@ -45,20 +30,18 @@ def fetch_market():
 
         data = r.json()
 
+        if not isinstance(data, list):
+            return []
+
         return data
 
     except:
 
-        # fallback fake data if API fails
-        return [
-            {"symbol": "btc", "price_change_percentage_24h": random.uniform(-2, 5)},
-            {"symbol": "eth", "price_change_percentage_24h": random.uniform(-2, 5)},
-            {"symbol": "sol", "price_change_percentage_24h": random.uniform(-2, 5)}
-        ]
+        return []
 
 
 # =========================
-# AI SCORING ENGINE
+# SAFE SCORING
 # =========================
 def score_assets(data):
 
@@ -66,17 +49,21 @@ def score_assets(data):
 
     for d in data:
 
-        momentum = d.get("price_change_percentage_24h", random.uniform(-2, 5))
+        try:
 
-        volume_factor = random.uniform(0.5, 1.5)
+            momentum = d.get("price_change_percentage_24h") or 0
 
-        score = (momentum * 10) * volume_factor + random.uniform(-1, 1)
+            score = (momentum * 10)
 
-        scored.append({
-            "symbol": d.get("symbol", "").upper(),
-            "score": round(score, 3),
-            "momentum": round(momentum, 3)
-        })
+            scored.append({
+                "symbol": d.get("symbol", "UNK").upper(),
+                "score": round(score, 3),
+                "momentum": round(momentum, 3)
+            })
+
+        except:
+
+            continue
 
     scored.sort(key=lambda x: x["score"], reverse=True)
 
@@ -84,40 +71,7 @@ def score_assets(data):
 
 
 # =========================
-# REGIME DETECTOR
-# =========================
-def detect_regime(top_score):
-
-    if top_score > 60:
-        return "EXPLOSIVE_ROTATION"
-
-    if top_score > 20:
-        return "TREND"
-
-    return "CHOP"
-
-
-# =========================
-# TELEGRAM SEND
-# =========================
-def send_message(chat_id, text):
-
-    try:
-
-        url = f"{BASE_URL}/sendMessage"
-
-        requests.post(url, json={
-            "chat_id": chat_id,
-            "text": text
-        }, timeout=10)
-
-    except Exception as e:
-
-        print("Telegram error:", str(e))
-
-
-# =========================
-# CORE AI
+# CORE ENGINE SAFE
 # =========================
 def ai_engine():
 
@@ -125,31 +79,23 @@ def ai_engine():
 
     scored = score_assets(market)
 
+    # 🔥 SAFE fallback
+    if len(scored) == 0:
+
+        return {
+            "model": "V36_SAFE",
+            "status": "NO_DATA",
+            "equity": 100.0,
+            "top10": []
+        }
+
     top10 = scored[:10]
 
-    regime = detect_regime(top10[0]["score"] if top10 else 0)
-
-    MEMORY["regime"] = regime
-    MEMORY["equity"] += top10[0]["score"] / 100
-    MEMORY["last_update"] = int(time.time())
-
-    portfolio = []
-
-    total = sum(x["score"] for x in top10) or 1
-
-    for x in top10[:5]:
-
-        portfolio.append({
-            "symbol": x["symbol"],
-            "weight": round(x["score"] / total, 3)
-        })
-
     return {
-        "model": "V36_REAL_MARKET_AI",
-        "regime": regime,
-        "equity": round(MEMORY["equity"], 3),
-        "top10": top10,
-        "portfolio": portfolio
+        "model": "V36_SAFE",
+        "status": "OK",
+        "equity": 100.0,
+        "top10": top10
     }
 
 
@@ -159,48 +105,48 @@ def ai_engine():
 @app.post("/webhook")
 async def webhook(request: Request):
 
-    data = await request.json()
+    try:
 
-    message = data["message"]["text"]
-    chat_id = data["message"]["chat"]["id"]
+        data = await request.json()
 
-    ai = ai_engine()
+        message = data["message"]["text"]
+        chat_id = data["message"]["chat"]["id"]
 
-    if message == "/start":
+        ai = ai_engine()
 
-        send_message(chat_id,
-            f"🚀 V36 REAL MARKET AI ACTIVE\nREGIME: {ai['regime']}"
-        )
+        if message == "/start":
 
-    elif message == "/update":
+            requests.post(BASE_URL + "/sendMessage", json={
+                "chat_id": chat_id,
+                "text": "🚀 V36 SAFE RUNNING"
+            })
 
-        text = f"🤖 V36 AI\nRegime: {ai['regime']}\nEquity: {ai['equity']}\n\nTOP 5:\n"
+        elif message == "/update":
 
-        for x in ai["top10"][:5]:
+            text = "📊 V36 UPDATE\n\n"
 
-            text += f"\n{x['symbol']} | {x['score']}"
+            for x in ai["top10"]:
 
-        send_message(chat_id, text)
+                text += f"{x['symbol']} | {x['score']}\n"
 
-    else:
+            if len(ai["top10"]) == 0:
+                text += "\n⚠️ No data from API"
 
-        send_message(chat_id, "Commands: /start /update")
+            requests.post(BASE_URL + "/sendMessage", json={
+                "chat_id": chat_id,
+                "text": text
+            })
+
+    except Exception as e:
+
+        print("CRASH FIXED ERROR:", str(e))
 
     return {"ok": True}
 
 
 # =========================
-# ROOT
+# TEST
 # =========================
-@app.get("/")
-def home():
-
-    return {
-        "system": "V36 REAL MARKET AI ACTIVE",
-        "status": "OK"
-    }
-
-
 @app.get("/update")
 def update():
 
