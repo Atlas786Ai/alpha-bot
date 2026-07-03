@@ -3,16 +3,24 @@ import requests
 import time
 import math
 import random
+import statistics
 
 app = FastAPI()
 
 # =========================
-# STATE
+# STATE (MEMORY SYSTEM)
 # =========================
 STATE = {
     "equity": 100.0,
-    "cache_time": 0,
-    "last_error": None
+    "last_error": None,
+    "weights": {
+        "momentum": 0.35,
+        "volume": 0.25,
+        "rank": 0.20,
+        "stability": 0.20
+    },
+    "memory": {},
+    "history": []
 }
 
 COINS_LIMIT = 100
@@ -24,35 +32,35 @@ COINS_LIMIT = 100
 @app.get("/")
 def home():
     return {
-        "model": "V45_QUANT_DATA_CORE",
-        "status": "ANTI-BLOCK MULTI-SOURCE ACTIVE"
+        "model": "V46_ADAPTIVE_QUANT_AI",
+        "status": "LEARNING + MEMORY + ADAPTIVE WEIGHTS ACTIVE"
     }
 
 
 # =========================
-# UPDATE ENDPOINT
+# UPDATE
 # =========================
 @app.get("/update")
 def update():
-    return run_v45()
+    return run_v46()
 
 
 # =========================
-# USER AGENT ROTATION
+# USER AGENT ROTATION (ANTI BLOCK)
 # =========================
 def headers_pool():
     return [
         {"User-Agent": "Mozilla/5.0"},
         {"User-Agent": "Chrome/120.0"},
         {"User-Agent": "Safari/537.36"},
-        {"User-Agent": "Mozilla/5.0 (Linux; Android 10)"},
+        {"User-Agent": "Mozilla/5.0 (Linux)"},
     ]
 
 
 # =========================
-# COINGECKO (SAFE RETRY)
+# DATA SOURCE (SAFE MULTI RETRY)
 # =========================
-def fetch_coingecko():
+def fetch_market():
 
     url = "https://api.coingecko.com/api/v3/coins/markets"
 
@@ -79,119 +87,139 @@ def fetch_coingecko():
 
         except Exception as e:
             STATE["last_error"] = str(e)
-            time.sleep(0.4)
+            time.sleep(0.3)
 
-    return None
-
-
-# =========================
-# BINANCE FALLBACK
-# =========================
-def fetch_binance():
-
-    try:
-        r = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=6)
-
-        data = r.json()
-
-        out = []
-
-        for d in data:
-            if "USDT" in d["symbol"]:
-                out.append({
-                    "symbol": d["symbol"].replace("USDT", ""),
-                    "price_change_percentage_24h": float(d.get("priceChangePercent", 0)),
-                    "total_volume": float(d.get("volume", 0)),
-                    "market_cap_rank": 50
-                })
-
-        if len(out) > 10:
-            return out
-
-    except Exception as e:
-        STATE["last_error"] = str(e)
-
-    return None
+    return []
 
 
 # =========================
-# FINAL FALLBACK (GUARANTEED)
+# REGIME DETECTION (MARKET STATE)
 # =========================
-def fallback_market():
+def detect_regime(market):
 
-    return [
-        {"symbol": "BTC", "price_change_percentage_24h": 1.2, "total_volume": 1000000, "market_cap_rank": 1},
-        {"symbol": "ETH", "price_change_percentage_24h": 0.9, "total_volume": 900000, "market_cap_rank": 2},
-        {"symbol": "SOL", "price_change_percentage_24h": 2.0, "total_volume": 700000, "market_cap_rank": 5},
-        {"symbol": "ARB", "price_change_percentage_24h": 3.1, "total_volume": 300000, "market_cap_rank": 20},
-        {"symbol": "AVAX", "price_change_percentage_24h": 1.5, "total_volume": 500000, "market_cap_rank": 10},
-        {"symbol": "LINK", "price_change_percentage_24h": 1.8, "total_volume": 400000, "market_cap_rank": 12},
-        {"symbol": "OP", "price_change_percentage_24h": 2.2, "total_volume": 350000, "market_cap_rank": 15},
-        {"symbol": "INJ", "price_change_percentage_24h": 3.5, "total_volume": 250000, "market_cap_rank": 25},
-        {"symbol": "TIA", "price_change_percentage_24h": 2.9, "total_volume": 200000, "market_cap_rank": 30},
-        {"symbol": "MATIC", "price_change_percentage_24h": 1.1, "total_volume": 600000, "market_cap_rank": 9}
-    ]
+    changes = [m.get("price_change_percentage_24h", 0) for m in market]
 
+    if not changes:
+        return "UNKNOWN"
 
-# =========================
-# UNIFIED MARKET LAYER
-# =========================
-def get_market():
+    avg = statistics.mean(changes)
 
-    data = fetch_coingecko()
+    if avg > 1.5:
+        return "BULL"
 
-    if data:
-        return data
+    if avg < -1.5:
+        return "BEAR"
 
-    data = fetch_binance()
-
-    if data:
-        return data
-
-    return fallback_market()
+    return "ACCUMULATION"
 
 
 # =========================
-# SCORE ENGINE
+# ADAPTIVE WEIGHT ENGINE (KEY FEATURE V46)
 # =========================
-def score(asset):
+def adapt_weights(regime):
 
-    change = asset.get("price_change_percentage_24h") or 0
-    volume = asset.get("total_volume") or 1
-    rank = asset.get("market_cap_rank") or 100
+    w = STATE["weights"]
 
+    if regime == "BULL":
+        w["momentum"] = min(w["momentum"] + 0.05, 0.5)
+        w["volume"] = min(w["volume"] + 0.03, 0.4)
+
+    elif regime == "BEAR":
+        w["stability"] = min(w["stability"] + 0.05, 0.5)
+        w["rank"] = min(w["rank"] + 0.03, 0.4)
+
+    else:
+        # neutral balancing
+        for k in w:
+            w[k] *= 0.99
+
+    total = sum(w.values())
+
+    for k in w:
+        w[k] = w[k] / total
+
+
+# =========================
+# SCORE ENGINE (ADAPTIVE)
+# =========================
+def score(asset, btc):
+
+    change = asset.get("price_change_percentage_24h", 0)
+    volume = asset.get("total_volume", 1)
+    rank = asset.get("market_cap_rank", 100)
+
+    rel = change - btc
     momentum = change / 10
     volume_log = math.log1p(volume)
     rank_score = 1 - min(rank / 100, 1)
     stability = 1 / (1 + abs(momentum))
 
+    w = STATE["weights"]
+
     return (
-        momentum * 0.25 +
-        volume_log * 0.20 +
-        rank_score * 0.20 +
-        stability * 0.15 +
-        change * 0.20
+        rel * w["momentum"] +
+        momentum * w["momentum"] +
+        volume_log * w["volume"] +
+        rank_score * w["rank"] +
+        stability * w["stability"]
     )
 
 
 # =========================
-# MAIN ENGINE V45
+# MEMORY UPDATE (LEARNING SYSTEM)
 # =========================
-def run_v45():
+def update_memory(symbol, score):
 
-    market = get_market()
+    if symbol not in STATE["memory"]:
+        STATE["memory"][symbol] = []
+
+    STATE["memory"][symbol].append(score)
+
+    if len(STATE["memory"][symbol]) > 20:
+        STATE["memory"][symbol].pop(0)
+
+
+# =========================
+# MAIN ENGINE V46
+# =========================
+def run_v46():
+
+    market = fetch_market()
+
+    if not market:
+        return {
+            "model": "V46_ADAPTIVE_QUANT_AI",
+            "status": "NO_DATA_SAFE_FALLBACK"
+        }
+
+    changes = [m.get("price_change_percentage_24h", 0) for m in market if m]
+
+    btc = 0
+
+    for m in market:
+        if m.get("symbol", "").upper() == "BTC":
+            btc = m.get("price_change_percentage_24h", 0)
+
+    regime = detect_regime(market)
+
+    adapt_weights(regime)
 
     scored = []
 
     for m in market:
 
-        s = score(m)
+        s = score(m, btc)
+
+        symbol = m.get("symbol", "").upper()
+
+        update_memory(symbol, s)
 
         scored.append({
-            "symbol": m.get("symbol", "").upper(),
-            "score": round(s, 5),
+            "symbol": symbol,
+            "score": round(s, 6),
             "momentum": m.get("price_change_percentage_24h", 0),
-            "rank": m.get("market_cap_rank", 100)
+            "rank": m.get("market_cap_rank", 100),
+            "memory_avg": round(sum(STATE["memory"].get(symbol, [s])) / len(STATE["memory"].get(symbol, [s])), 6)
         })
 
     scored.sort(key=lambda x: x["score"], reverse=True)
@@ -208,12 +236,19 @@ def run_v45():
         for x in top10[:5]
     ]
 
-    # equity update (simple simulation)
-    STATE["equity"] += sum(x["score"] for x in top10) / 10000
+    # equity learning simulation
+    STATE["equity"] += sum(x["score"] for x in top10) / 20000
+
+    STATE["history"].append(STATE["equity"])
+
+    if len(STATE["history"]) > 50:
+        STATE["history"].pop(0)
 
     return {
-        "model": "V45_QUANT_DATA_CORE",
+        "model": "V46_ADAPTIVE_QUANT_AI",
         "status": "OK",
+        "regime": regime,
+        "weights": STATE["weights"],
         "top10": top10,
         "portfolio": portfolio,
         "equity": round(STATE["equity"], 4),
