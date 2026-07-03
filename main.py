@@ -2,11 +2,12 @@ from fastapi import FastAPI
 import requests
 import time
 import math
+import statistics
 
 app = FastAPI()
 
 # =========================
-# CANONICAL STATE
+# STATE
 # =========================
 STATE = {
     "equity": 100.0,
@@ -24,13 +25,13 @@ CACHE_TTL = 60
 @app.get("/")
 def home():
     return {
-        "model": "ATLAS_CANONICAL_V1",
-        "status": "UNIFIED_SYSTEM_ACTIVE"
+        "model": "ATLAS_CANONICAL_V2",
+        "status": "REGIME_AWARE_QUANT_SYSTEM"
     }
 
 
 # =========================
-# UPDATE ENDPOINT
+# UPDATE
 # =========================
 @app.get("/update")
 def update():
@@ -38,19 +39,18 @@ def update():
         return run_system()
     except Exception as e:
         return {
-            "model": "ATLAS_CANONICAL_V1",
-            "status": "SAFE_ERROR_HANDLED",
+            "model": "ATLAS_CANONICAL_V2",
+            "status": "SAFE_ERROR",
             "error": str(e),
             "equity": STATE["equity"]
         }
 
 
 # =========================
-# SAFE DATA FETCH
+# DATA FETCH (SAFE + CACHE)
 # =========================
 def fetch_market():
 
-    # CACHE FIRST
     if STATE["cache"] and time.time() - STATE["cache_time"] < CACHE_TTL:
         return STATE["cache"]
 
@@ -77,7 +77,7 @@ def fetch_market():
     except Exception as e:
         STATE["last_error"] = str(e)
 
-    # HARD FALLBACK (guaranteed schema)
+    # fallback safe universe
     return [
         {"symbol": "BTC", "price_change_percentage_24h": 1.0, "total_volume": 1000000, "market_cap_rank": 1},
         {"symbol": "ETH", "price_change_percentage_24h": 0.8, "total_volume": 900000, "market_cap_rank": 2},
@@ -88,7 +88,7 @@ def fetch_market():
 
 
 # =========================
-# NORMALIZATION LAYER
+# NORMALIZE
 # =========================
 def normalize(x):
 
@@ -101,25 +101,49 @@ def normalize(x):
 
 
 # =========================
-# SIGNAL ENGINE (CORE INTELLIGENCE)
+# REGIME DETECTION
 # =========================
-def score(asset):
+def detect_regime(market):
+
+    changes = [m["change"] for m in market]
+
+    avg = statistics.mean(changes)
+
+    if avg > 1.2:
+        return "BULL"
+    elif avg < -1.2:
+        return "BEAR"
+    return "NEUTRAL"
+
+
+# =========================
+# SCORE ENGINE (V2)
+# =========================
+def score(asset, regime):
 
     change = asset["change"]
     volume = asset["volume"]
     rank = asset["rank"]
 
     momentum = change / 10
-    volume_score = math.log1p(volume)
+    vol_score = math.log1p(volume)
     rank_score = 1 - min(rank / 100, 1)
 
+    # regime adjustment
+    regime_factor = 1.2 if regime == "BULL" else 0.9 if regime == "BEAR" else 1.0
+
+    # volatility penalty (stability proxy)
     stability = 1 / (1 + abs(momentum))
 
+    # BTC anchor effect
+    btc_anchor = 1.0 if asset["symbol"] == "BTC" else 0.0
+
     return (
-        momentum * 0.30 +
-        volume_score * 0.25 +
-        rank_score * 0.25 +
-        stability * 0.20
+        (momentum * 0.30 +
+         vol_score * 0.25 +
+         rank_score * 0.25 +
+         stability * 0.20) * regime_factor
+        + btc_anchor * 0.5
     )
 
 
@@ -128,33 +152,35 @@ def score(asset):
 # =========================
 def build_portfolio(scored):
 
-    top5 = scored[:5]
+    top = scored[:5]
 
-    total = sum(abs(x["score"]) for x in top5) or 1
+    total = sum(abs(x["score"]) for x in top) or 1
 
     return [
         {
             "symbol": x["symbol"],
             "weight": round(abs(x["score"]) / total, 4)
         }
-        for x in top5
+        for x in top
     ]
 
 
 # =========================
-# MAIN CANONICAL ENGINE
+# MAIN ENGINE V2
 # =========================
 def run_system():
 
     raw = fetch_market()
 
-    normalized = [normalize(x) for x in raw]
+    market = [normalize(x) for x in raw]
+
+    regime = detect_regime(market)
 
     scored = []
 
-    for x in normalized:
+    for x in market:
 
-        s = score(x)
+        s = score(x, regime)
 
         scored.append({
             "symbol": x["symbol"],
@@ -169,9 +195,13 @@ def run_system():
 
     STATE["equity"] += sum(x["score"] for x in scored[:10]) / 20000
 
+    confidence = min(1.0, abs(sum(x["score"] for x in scored[:10])) / 50)
+
     return {
-        "model": "ATLAS_CANONICAL_V1",
+        "model": "ATLAS_CANONICAL_V2",
         "status": "OK",
+        "regime": regime,
+        "confidence": round(confidence, 4),
         "top10": scored[:10],
         "portfolio": portfolio,
         "equity": round(STATE["equity"], 4),
