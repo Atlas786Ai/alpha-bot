@@ -1,161 +1,147 @@
-from fastapi import FastAPI, Request
-import os
-import requests
-import traceback
+from fastapi import FastAPI
+import random
 
 app = FastAPI()
 
 
 # =========================
-# ENV CONFIG
+# UNIVERSE (100 COINS SIMULATION)
 # =========================
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-
-if not BOT_TOKEN:
-    print("❌ ERROR: TELEGRAM_BOT_TOKEN is not set")
-
-BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+COINS = [
+    "BTC","ETH","SOL","ARB","AVAX","DOGE","MATIC","OP","INJ","TIA",
+    "NEAR","SUI","APT","LTC","XRP","BNB","LINK","UNI","AAVE","FTM"
+]
 
 
 # =========================
-# AI ENGINE V33
+# INITIAL MODEL WEIGHTS
 # =========================
-def ai_engine():
+weights = {
+    "momentum": 0.35,
+    "volatility": 0.25,
+    "trend": 0.25,
+    "noise": 0.15
+}
+
+
+# =========================
+# GENERATE MARKET SNAPSHOT
+# =========================
+def market_snapshot():
+
+    data = {}
+
+    for c in COINS:
+
+        price_trend = random.uniform(-2, 6)
+        volatility = random.uniform(0.01, 0.3)
+        momentum = random.uniform(-1, 5)
+
+        score = (
+            price_trend * weights["trend"] +
+            momentum * weights["momentum"] -
+            volatility * weights["volatility"] +
+            random.uniform(-0.5, 0.5) * weights["noise"]
+        )
+
+        data[c] = {
+            "score": round(score, 3),
+            "trend": price_trend,
+            "momentum": momentum,
+            "vol": volatility
+        }
+
+    return data
+
+
+# =========================
+# BACKTEST ONE PERIOD (3 MONTHS)
+# =========================
+def backtest_period(period_id):
+
+    snapshot = market_snapshot()
+
+    ranked = sorted(snapshot.items(), key=lambda x: x[1]["score"], reverse=True)
+
+    top10 = ranked[:10]
+
+    # simulate "truth" (future performance)
+    future = {c: random.uniform(-1, 8) for c in COINS}
+
+    correct = 0
+
+    for c, _ in top10:
+        if future[c] > 2:  # success threshold
+            correct += 1
+
+    win_rate = correct / 10
 
     return {
-        "model": "SOLANA_AI_V33_TELEGRAM_AI_CORE",
-        "regime": "EXPLOSIVE_ROTATION",
-        "equity": 100.0,
-        "signals": [
-            {"symbol": "ARB", "score": 42.8, "momentum": 1.9},
-            {"symbol": "SOL", "score": 39.2, "momentum": 2.4},
-            {"symbol": "ETH", "score": 28.1, "momentum": 1.1},
-            {"symbol": "AVAX", "score": 24.6, "momentum": 0.9},
-            {"symbol": "DOGE", "score": 18.3, "momentum": 1.7}
-        ]
+        "period": period_id,
+        "top10": [{"symbol": c, "score": v["score"]} for c, v in top10],
+        "win_rate": round(win_rate, 3)
     }
 
 
 # =========================
-# TELEGRAM SEND (SAFE)
+# ADAPTIVE WEIGHT UPDATE
 # =========================
-def send_message(chat_id, text):
+def adapt_weights(results):
 
-    try:
-        url = f"{BASE_URL}/sendMessage"
+    avg_win = sum(r["win_rate"] for r in results) / len(results)
 
-        payload = {
-            "chat_id": chat_id,
-            "text": text
-        }
+    # simple learning rule
+    if avg_win < 0.5:
+        weights["momentum"] += 0.05
+        weights["noise"] -= 0.03
 
-        r = requests.post(url, json=payload, timeout=10)
+    if avg_win > 0.7:
+        weights["trend"] += 0.05
+        weights["volatility"] -= 0.02
 
-        print("SEND STATUS:", r.status_code, r.text)
+    # normalize
+    total = sum(weights.values())
 
-    except Exception as e:
-        print("SEND ERROR:", str(e))
-
-
-# =========================
-# AUTO DEBUG ENGINE
-# =========================
-def debug_engine(error):
-
-    err = str(error)
-
-    fixes = []
-
-    if "IndentationError" in err:
-        fixes.append("Fix indentation (spaces/tabs mismatch)")
-
-    if "KeyError" in err:
-        fixes.append("Missing dictionary key in request")
-
-    if "404" in err:
-        fixes.append("Fix Telegram API URL or webhook route")
-
-    if "401" in err:
-        fixes.append("Check BOT TOKEN")
-
-    if len(fixes) == 0:
-        fixes.append("Unknown error - manual inspection required")
-
-    return fixes
+    for k in weights:
+        weights[k] /= total
 
 
 # =========================
-# WEBHOOK (MAIN TELEGRAM HANDLER)
+# MAIN BACKTEST ENGINE
 # =========================
-@app.post("/webhook")
-async def webhook(request: Request):
+def run_backtest():
 
-    try:
+    results = []
 
-        data = await request.json()
-        print("DEBUG:", data)
+    for i in range(4):  # 4 quarters
 
-        message = data["message"]["text"]
-        chat_id = data["message"]["chat"]["id"]
+        res = backtest_period(f"Q{i+1}")
+        results.append(res)
 
-        # -------------------------
-        # START COMMAND
-        # -------------------------
-        if message == "/start":
+    adapt_weights(results)
 
-            send_message(chat_id, "🚀 V33 AI BOT IS LIVE")
+    avg_win = sum(r["win_rate"] for r in results) / 4
 
-        # -------------------------
-        # UPDATE COMMAND (AI RESPONSE)
-        # -------------------------
-        elif message == "/update":
-
-            ai = ai_engine()
-
-            text = f"""
-🤖 MODEL: {ai['model']}
-📊 REGIME: {ai['regime']}
-💰 EQUITY: {ai['equity']}
-
-📈 SIGNALS:
-"""
-
-            for s in ai["signals"]:
-                text += f"\n- {s['symbol']} | score: {s['score']} | mom: {s['momentum']}"
-
-            send_message(chat_id, text)
-
-        else:
-
-            send_message(chat_id, "Unknown command. Use /start or /update")
-
-    except Exception as e:
-
-        print("WEBHOOK CRASH:", str(e))
-
-        fixes = debug_engine(e)
-
-        print("AUTO FIX SUGGESTIONS:", fixes)
-
-    return {"ok": True}
+    return {
+        "model": "V35_BACKTEST_ENGINE",
+        "periods": results,
+        "avg_win_rate": round(avg_win, 3),
+        "updated_weights": weights
+    }
 
 
 # =========================
-# ROOT
+# API
 # =========================
 @app.get("/")
 def home():
 
     return {
-        "system": "V33 TELEGRAM AI ACTIVE",
-        "status": "OK"
+        "system": "V35 BACKTEST ENGINE ACTIVE"
     }
 
 
-# =========================
-# BROWSER TEST UPDATE
-# =========================
-@app.get("/update")
-def update():
+@app.get("/backtest")
+def backtest():
 
-    return ai_engine()
+    return run_backtest()
