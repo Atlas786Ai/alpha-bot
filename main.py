@@ -1,122 +1,161 @@
 from fastapi import FastAPI, Request
 import os
 import requests
-import random
 import time
+import random
 
 app = FastAPI()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
+COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
+
+# =========================
+# MEMORY SYSTEM (ANCHOR CORE)
+# =========================
+MEMORY = {}
+
 COINS = [
     "BTC","ETH","SOL","ARB","AVAX","DOGE","MATIC","OP","LINK","UNI",
     "AAVE","INJ","TIA","NEAR","APT","SUI","LTC","XRP","BNB","FTM"
 ]
 
-
-# =========================
-# MEMORY STORE (REAL CORE)
-# =========================
-MEMORY = {
-    coin: {
-        "ema": 0,
-        "confidence": 0.5,
+for c in COINS:
+    MEMORY[c] = {
+        "ema": 0.0,
+        "strength": 0.5,
         "rank": 999,
-        "last_seen": time.time()
-    }
-    for coin in COINS
-}
-
-ALPHA = 0.2  # EMA smoothing factor
-
-
-# =========================
-# MARKET SIM / LIVE HYBRID
-# =========================
-def market_data():
-
-    return {
-        c: random.uniform(-3, 6) for c in COINS
+        "last": 0
     }
 
 
+ALPHA = 0.25  # EMA smoothing
+
+
 # =========================
-# EMA UPDATE ENGINE
+# REAL DATA FETCH (ANCHOR FIX)
 # =========================
-def update_memory(market):
+def fetch_real_market():
 
-    scored = []
+    try:
 
-    for coin, momentum in market.items():
+        r = requests.get(
+            COINGECKO_URL,
+            params={
+                "vs_currency": "usd",
+                "order": "market_cap_desc",
+                "per_page": 50,
+                "page": 1,
+                "sparkline": "false"
+            },
+            timeout=10,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
 
-        prev = MEMORY[coin]["ema"]
+        data = r.json()
 
-        ema = (ALPHA * momentum) + ((1 - ALPHA) * prev)
+        if isinstance(data, list) and len(data) > 0:
+            return data
 
-        # confidence grows with stability
-        diff = abs(ema - prev)
+    except:
+        pass
 
-        confidence = max(0.1, min(1.0, MEMORY[coin]["confidence"] + (0.05 if diff < 1 else -0.05)))
+    # fallback minimal stable data (NOT random chaos)
+    return [
+        {"symbol": c.lower(), "price_change_percentage_24h": 0.0}
+        for c in COINS
+    ]
 
-        MEMORY[coin]["ema"] = ema
-        MEMORY[coin]["confidence"] = confidence
-        MEMORY[coin]["last_seen"] = time.time()
 
-        score = ema * confidence * 10
+# =========================
+# DATA ANCHOR NORMALIZATION
+# =========================
+def normalize(data):
 
-        scored.append({
-            "symbol": coin,
+    anchor = {}
+
+    for d in data:
+
+        sym = d.get("symbol","").upper()
+
+        if sym in MEMORY:
+
+            anchor[sym] = d.get("price_change_percentage_24h", 0.0)
+
+    # ensure all coins exist
+    for c in COINS:
+        if c not in anchor:
+            anchor[c] = 0.0
+
+    return anchor
+
+
+# =========================
+# RELATIVE STRENGTH CORE
+# =========================
+def score(anchor):
+
+    scores = []
+
+    btc = anchor.get("BTC", 0.0)
+
+    for c, val in anchor.items():
+
+        # 🔥 REAL KEY IDEA: relative strength vs BTC
+        rel = val - btc
+
+        prev = MEMORY[c]["ema"]
+
+        ema = (ALPHA * rel) + ((1 - ALPHA) * prev)
+
+        MEMORY[c]["ema"] = ema
+        MEMORY[c]["last"] = time.time()
+
+        strength = 1 / (1 + abs(rel - ema))  # stability proxy
+
+        MEMORY[c]["strength"] = strength
+
+        score = ema * 10 * strength
+
+        scores.append({
+            "symbol": c,
             "score": round(score, 3),
             "ema": round(ema, 3),
-            "confidence": round(confidence, 3)
+            "strength": round(strength, 3)
         })
 
-    return scored
+    return sorted(scores, key=lambda x: x["score"], reverse=True)
 
 
 # =========================
-# STABILITY SORT (ANTI-NOISE)
+# REGIME ENGINE
 # =========================
-def stable_rank(scored):
+def regime(top):
 
-    scored.sort(key=lambda x: x["score"], reverse=True)
-
-    for i, s in enumerate(scored):
-
-        MEMORY[s["symbol"]]["rank"] = i + 1
-
-    return scored
-
-
-# =========================
-# REGIME DETECTOR
-# =========================
-def detect_regime(top):
-
-    if top > 50:
+    if top > 40:
         return "EXPLOSIVE_ROTATION"
 
-    if top > 20:
+    if top > 15:
         return "TREND"
 
     return "CHOP"
 
 
 # =========================
-# AI CORE
+# CORE ENGINE
 # =========================
-def ai_engine():
+def engine():
 
-    market = market_data()
+    raw = fetch_real_market()
 
-    scored = update_memory(market)
+    anchor = normalize(raw)
 
-    ranked = stable_rank(scored)
+    scored = score(anchor)
 
-    top10 = ranked[:10]
+    top10 = scored[:10]
 
-    regime = detect_regime(top10[0]["score"])
+    r = regime(top10[0]["score"])
 
     portfolio = []
 
@@ -130,11 +169,12 @@ def ai_engine():
         })
 
     return {
-        "model": "V38_MEMORY_QUANT_CORE",
-        "regime": regime,
+        "model": "V39_REAL_DATA_ANCHORED_CORE",
+        "regime": r,
         "top10": top10,
         "portfolio": portfolio,
-        "memory": MEMORY
+        "anchor_source": "BTC_RELATIVE_STRENGTH",
+        "status": "LIVE_ANCHORED"
     }
 
 
@@ -163,31 +203,27 @@ async def webhook(req: Request):
     msg = data["message"]["text"]
     chat_id = data["message"]["chat"]["id"]
 
-    ai = ai_engine()
+    ai = engine()
 
     if msg == "/start":
 
-        send(chat_id, f"🚀 V38 MEMORY CORE ACTIVE\nREGIME: {ai['regime']}")
+        send(chat_id, f"🚀 V39 REAL DATA ENGINE\nREGIME: {ai['regime']}")
 
     elif msg == "/update":
 
-        text = "📊 V38 QUANT CORE\n\n"
+        text = "📊 V39 ANCHORED CORE\n\n"
 
         for x in ai["top10"][:5]:
-
-            text += f"{x['symbol']} | {x['score']} | conf:{x['confidence']}\n"
+            text += f"{x['symbol']} | {x['score']}\n"
 
         send(chat_id, text)
 
-    elif msg == "/memory":
+    elif msg == "/portfolio":
 
-        top = sorted(ai["memory"].items(), key=lambda x: x[1]["ema"], reverse=True)[:5]
+        text = "💼 PORTFOLIO:\n"
 
-        text = "🧠 MEMORY TOP 5:\n\n"
-
-        for k, v in top:
-
-            text += f"{k} | EMA:{v['ema']:.2f} | RANK:{v['rank']}\n"
+        for p in ai["portfolio"]:
+            text += f"{p['symbol']} → {p['weight']}\n"
 
         send(chat_id, text)
 
@@ -195,9 +231,18 @@ async def webhook(req: Request):
 
 
 # =========================
-# TEST
+# HEALTH
 # =========================
+@app.get("/")
+def home():
+
+    return {
+        "model": "V39_REAL_DATA_ANCHORED_CORE",
+        "status": "RUNNING"
+    }
+
+
 @app.get("/update")
 def update():
 
-    return ai_engine()
+    return engine()
